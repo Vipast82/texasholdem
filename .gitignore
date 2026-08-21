@@ -1,0 +1,27 @@
+node_modules/
+dist/
+coverage/
+.vite/
+
+# Logs & scratch
+*.log
+mcp.log
+_cli*.log
+_srv*.log
+_client*.log
+
+# Secrets / local config
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local tooling scratch (kept out of the repo)
+_playwright/
+_tmp_*
+_*.ps1
+_testavatar.gif
+frontend/_tmp_css.txt
