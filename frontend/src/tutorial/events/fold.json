@@ -1,0 +1,12 @@
+{
+  "eventKey": "fold",
+  "title": "tut.fold.title",
+  "messages": {
+    "concise": "tut.fold.concise",
+    "normal": "tut.fold.normal",
+    "detailed": "tut.fold.detailed"
+  },
+  "highlight": ["controls"],
+  "pause": false,
+  "strategyHint": { "enabled": true, "text": "tut.hint.text" }
+}

@@ -1,0 +1,31 @@
+{
+  "name": "texas-holdem-saloon",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-network browser Texas Holdem poker with an interactive tutorial — western saloon theme",
+  "license": "MIT",
+  "workspaces": [
+    "shared",
+    "server",
+    "frontend"
+  ],
+  "scripts": {
+    "lint": "eslint . --max-warnings=0",
+    "test": "vitest run",
+    "test:server": "npm run test -w server",
+    "build": "npm run build -w frontend",
+    "start": "npm run start -w server",
+    "dev:server": "npm run dev -w server",
+    "dev:client": "npm run dev -w frontend"
+  },
+  "devDependencies": {
+    "@eslint/js": "^8.57.0",
+    "@types/eslint": "^8.56.10",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-react": "^7.34.29",
+    "eslint-plugin-react-hooks": "^4.6.2",
+    "prettier": "^3.3.3",
+    "vitest": "^1.6.0"
+  }
+}

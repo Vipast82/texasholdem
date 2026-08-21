@@ -1,0 +1,12 @@
+{
+  "eventKey": "shuffle",
+  "title": "tut.shuffle.title",
+  "messages": {
+    "concise": "tut.shuffle.concise",
+    "normal": "tut.shuffle.normal",
+    "detailed": "tut.shuffle.detailed"
+  },
+  "highlight": ["table"],
+  "pause": false,
+  "strategyHint": { "enabled": false, "text": "tut.hint.disabled" }
+}

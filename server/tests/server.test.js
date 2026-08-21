@@ -1,0 +1,253 @@
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { io as Client } from 'socket.io-client';
+import { startServer } from '../src/index.js';
+
+describe('server end-to-end', () => {
+  let server;
+  let ioUrl;
+
+  beforeAll(async () => {
+    process.env.NODE_ENV = 'test';
+    const started = await startServer();
+    server = started.server;
+    ioUrl = started.url;
+  });
+
+  afterAll(async () => {
+    server.close();
+  });
+
+  const join = (url, tableId, name) =>
+    new Promise((resolve, reject) => {
+      const socket = Client(url, { transports: ['websocket'] });
+      socket.on('connect', () =>
+        socket.emit('joinTable', { tableId, name }, (res) => {
+          if (res.ok) resolve({ socket, playerId: res.playerId });
+          else reject(new Error(res.error));
+        })
+      );
+      socket.on('connect_error', reject);
+    });
+
+  const ack = (socket, event, payload = {}) =>
+    new Promise((resolve) => socket.emit(event, payload, resolve));
+
+  it('two clients complete a full hand to showdown and chips are conserved', async () => {
+    const tableId = `t-${Date.now()}`;
+    const [a, b] = await Promise.all([
+      join(ioUrl, tableId, 'Alice'),
+      join(ioUrl, tableId, 'Bob')
+    ]);
+    const alice = a.socket;
+    const bob = b.socket;
+    const aliceId = a.playerId;
+    const bobId = b.playerId;
+    // Two distinct sockets must be two distinct players.
+    expect(aliceId).not.toBe(bobId);
+
+    // Track each player's own broadcast view (their private hole-card perspective).
+    const states = new Map();
+    alice.on('state', (s) => states.set('alice', s));
+    bob.on('state', (s) => states.set('bob', s));
+
+    const startRes = await ack(alice, 'startHand');
+    expect(startRes.ok).toBe(true);
+    expect(startRes.snapshot.inHand).toBe(true);
+
+
+
+    // Drive the hand with the cheapest legal action (check/call) until it ends.
+    // We advance off the authoritative per-action ack snapshot, whose betting
+    // state (nextActorId / currentBet / street / contributions) is shared by
+    // every viewer - only hole cards are per-viewer.
+    let snapshot = startRes.snapshot;
+    let guard = 0;
+    while (guard < 400) {
+      guard += 1;
+      if (!snapshot.inHand) break;
+      const nextId = snapshot.nextActorId;
+      expect(nextId).toBeTruthy();
+      const me = snapshot.players.find((p) => p.id === nextId);
+      const toCall = Math.max(0, snapshot.currentBet - me.contributions[snapshot.street]);
+      const action = toCall === 0 ? 'check' : 'call';
+      const socket = nextId === aliceId ? alice : bob;
+      const res = await ack(socket, 'playerAction', { action, amount: 0 });
+      expect(res.ok).toBe(true, `action ${action} rejected: ${res.error}`);
+      snapshot = res.snapshot;
+    }
+
+    // Read Alice's final private view (her hole cards visible, Bob's not).
+    let finalA = states.get('alice');
+    const deadline = Date.now() + 2000;
+    while (Date.now() < deadline && finalA && finalA.inHand) {
+      await new Promise((r) => setTimeout(r, 10));
+      finalA = states.get('alice');
+    }
+    expect(finalA).toBeTruthy();
+    expect(finalA.inHand).toBe(false);
+    expect(finalA.community).toHaveLength(5);
+
+    // Chips conserved: both players' stacks + pot = starting total.
+    const total = finalA.players.reduce((sum, p) => sum + p.chips, 0) + finalA.pot;
+    expect(total).toBe(finalA.startingStack * 2);
+
+    // Alice never sees Bob's hole cards in her own view.
+    const bobInAlice = finalA.players.find((p) => p.name === 'Bob');
+    expect(bobInAlice.holeCards).toBeNull();
+    // ... and her own hole cards ARE visible to her.
+    const aliceInAlice = finalA.players.find((p) => p.name === 'Alice');
+    expect(aliceInAlice.holeCards).toHaveLength(2);
+
+    alice.close();
+    bob.close();
+  });
+});
+
+// -----------------------------------------------------------------------------
+// Sprint 4: spectator mode (show-all + step-through) and hand-history export.
+// -----------------------------------------------------------------------------
+
+describe('server spectator + history (Sprint 4)', () => {
+  let server;
+  let ioUrl;
+
+  beforeAll(async () => {
+    process.env.NODE_ENV = 'test';
+    const started = await startServer();
+    server = started.server;
+    ioUrl = started.url;
+  });
+
+  afterAll(async () => {
+    server.close();
+  });
+
+  const join = (url, tableId, name) =>
+    new Promise((resolve, reject) => {
+      const socket = Client(url, { transports: ['websocket'] });
+      socket.on('connect', () =>
+        socket.emit('joinTable', { tableId, name }, (res) => {
+          if (res.ok) resolve({ socket, playerId: res.playerId });
+          else reject(new Error(res.error));
+        })
+      );
+      socket.on('connect_error', reject);
+    });
+
+  const enterSpectator = (url, tableId, showAllCards) =>
+    new Promise((resolve, reject) => {
+      const socket = Client(url, { transports: ['websocket'] });
+      socket.on('connect', () =>
+        socket.emit('enterSpectator', { tableId, showAllCards }, (res) => {
+          if (res.ok) resolve({ socket, snapshot: res.snapshot });
+          else reject(new Error(res.error));
+        })
+      );
+      socket.on('connect_error', reject);
+    });
+
+  const ack = (socket, event, payload = {}) =>
+    new Promise((resolve) => socket.emit(event, payload, resolve));
+
+  it('spectator sees all hole cards; a live player never does', async () => {
+    const tableId = `spec-${Date.now()}`;
+    const [a, b] = await Promise.all([join(ioUrl, tableId, 'P1'), join(ioUrl, tableId, 'P2')]);
+    // A live player starts a hand so hole cards get dealt.
+    const start = await ack(a.socket, 'startHand');
+    expect(start.ok).toBe(true);
+    expect(start.snapshot.inHand).toBe(true);
+
+    // A spectator joins with show-all ON and sees BOTH players' hole cards.
+    const { socket: spec, snapshot } = await enterSpectator(ioUrl, tableId, true);
+    expect(snapshot.spectator).toBe(true);
+    expect(snapshot.playerId).toBeNull();
+    expect(snapshot.players.find((p) => p.name === 'P1').holeCards).toHaveLength(2);
+    expect(snapshot.players.find((p) => p.name === 'P2').holeCards).toHaveLength(2);
+
+    // Toggling show-all OFF hides every other seat's hole cards (no own seat).
+    const off = await ack(spec, 'setShowAllCards', { tableId, on: false });
+    expect(off.ok).toBe(true);
+    expect(off.snapshot.players.find((p) => p.name === 'P2').holeCards).toBeNull();
+    expect(off.snapshot.players.find((p) => p.name === 'P1').holeCards).toBeNull();
+
+    spec.close();
+    a.socket.close();
+    b.socket.close();
+  });
+
+  it('auto-advance pauses while a spectator is present; `step` advances the hand', async () => {
+    const tableId = `step-${Date.now()}`;
+    // A human host + a server-side bot opponent (no socket for the bot).
+    const host = await new Promise((resolve, reject) => {
+      const socket = Client(ioUrl, { transports: ['websocket'] });
+      socket.on('connect', () =>
+        socket.emit('joinTable', { tableId, name: 'Host', spawnBot: true, botDifficulty: 'easy' }, (res) => {
+          if (res.ok) resolve({ socket, playerId: res.playerId });
+          else reject(new Error(res.error));
+        })
+      );
+      socket.on('connect_error', reject);
+    });
+    // Enter a spectator: this FREEZES the table (auto-advance paused).
+    const { socket: spec } = await enterSpectator(ioUrl, tableId, true);
+
+    // Start a hand as the host, then step through it as the spectator.
+    const start = await ack(host.socket, 'startHand');
+    expect(start.ok).toBe(true);
+    expect(start.snapshot.inHand).toBe(true);
+
+    // Step through the hand to completion via `step`.
+    let snap = start.snapshot;
+    let guard = 0;
+    while (snap.inHand && guard < 400) {
+      guard += 1;
+      const res = await ack(spec, 'step', { tableId });
+      expect(res.ok).toBe(true, `step failed: ${res.error}`);
+      snap = res.snapshot;
+    }
+    expect(snap.inHand).toBe(false);
+
+    spec.close();
+    host.socket.close();
+  });
+
+  it('records a hand record and serves it via getHistory / exportHistory', async () => {
+    const tableId = `hist-${Date.now()}`;
+    const [a, b] = await Promise.all([join(ioUrl, tableId, 'H1'), join(ioUrl, tableId, 'H2')]);
+
+    // Complete one hand.
+    const start = await ack(a.socket, 'startHand');
+    let snap = start.snapshot;
+    let guard = 0;
+    while (snap.inHand && guard < 400) {
+      guard += 1;
+      const nextId = snap.nextActorId;
+      const me = snap.players.find((p) => p.id === nextId);
+      const toCall = Math.max(0, snap.currentBet - me.contributions[snap.street]);
+      const action = toCall === 0 ? 'check' : 'call';
+      const socket = nextId === a.playerId ? a.socket : b.socket;
+      const res = await ack(socket, 'playerAction', { action, amount: 0 });
+      snap = res.snapshot;
+    }
+
+    // Allow the handEnded -> recordHand broadcast to land.
+    await new Promise((r) => setTimeout(r, 50));
+
+    const hist = await ack(a.socket, 'getHistory', { tableId });
+    expect(hist.ok).toBe(true);
+    const mine = hist.hands.filter((h) => h.tableId === tableId);
+    expect(mine.length).toBeGreaterThan(0);
+    const rec = mine[mine.length - 1];
+    expect(rec.schema).toBe('saloon.hand-record/v1');
+    expect(Array.isArray(rec.board)).toBe(true);
+    expect(Array.isArray(rec.players)).toBe(true);
+
+    const exp = await ack(a.socket, 'exportHistory', { tableId });
+    expect(exp.ok).toBe(true);
+    const parsed = JSON.parse(exp.json);
+    expect(parsed.hands.length).toBeGreaterThan(0);
+
+    a.socket.close();
+    b.socket.close();
+  });
+});

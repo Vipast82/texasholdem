@@ -1,0 +1,12 @@
+{
+  "eventKey": "bet",
+  "title": "tut.bet.title",
+  "messages": {
+    "concise": "tut.bet.concise",
+    "normal": "tut.bet.normal",
+    "detailed": "tut.bet.detailed"
+  },
+  "highlight": ["controls", "pot"],
+  "pause": true,
+  "strategyHint": { "enabled": true, "text": "tut.hint.text" }
+}

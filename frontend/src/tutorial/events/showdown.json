@@ -1,0 +1,12 @@
+{
+  "eventKey": "showdown",
+  "title": "tut.showdown.title",
+  "messages": {
+    "concise": "tut.showdown.concise",
+    "normal": "tut.showdown.normal",
+    "detailed": "tut.showdown.detailed"
+  },
+  "highlight": ["community", "showdown"],
+  "pause": true,
+  "strategyHint": { "enabled": false, "text": "tut.hint.disabled" }
+}

@@ -1,0 +1,12 @@
+{
+  "eventKey": "turn",
+  "title": "tut.turn.title",
+  "messages": {
+    "concise": "tut.turn.concise",
+    "normal": "tut.turn.normal",
+    "detailed": "tut.turn.detailed"
+  },
+  "highlight": ["community", "street"],
+  "pause": false,
+  "strategyHint": { "enabled": true, "text": "tut.hint.text" }
+}

@@ -1,0 +1,27 @@
+{
+  "name": "@saloon/shared",
+  "version": "0.1.0",
+  "description": "Deterministic Texas Holdem domain logic: cards, RNG, hand evaluation, pots, betting rules, game engine",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./cards": "./src/cards.js",
+    "./rng": "./src/rng.js",
+    "./handEvaluator": "./src/handEvaluator.js",
+    "./potSplit": "./src/potSplit.js",
+    "./bettingRules": "./src/bettingRules.js",
+    "./gameEngine": "./src/gameEngine.js",
+    "./ai": "./src/ai/aiEngine.js",
+    "./ai/aiProfiles": "./src/ai/aiProfiles.js",
+    "./ai/aiMonteCarlo": "./src/ai/aiMonteCarlo.js",
+    "./ai/aiDecision": "./src/ai/aiDecision.js",
+    "./ai/aiEngine": "./src/ai/aiEngine.js",
+    "./tutorialHint": "./src/tutorialHint.js",
+    "./equity": "./src/equity.js",
+    "./history": "./src/history.js"
+  },
+  "scripts": {
+    "test": "vitest run"
+  }
+}

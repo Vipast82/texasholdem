@@ -1,0 +1,25 @@
+{
+  "seed": "sprint3-tutorial-v1",
+  "description": "Fixed seed for the seeded walkthrough. The same seed always reproduces the same deck and therefore the same hand. Verified by the tests in frontend/tests/tutorialEngine.test.js.",
+  "table": {
+    "smallBlind": 10,
+    "bigBlind": 20,
+    "startingStack": 500,
+    "seats": 2,
+    "players": [
+      { "id": "A", "name": "Alice", "seat": 0 },
+      { "id": "B", "name": "Bob",   "seat": 1 }
+    ]
+  },
+  "expected": {
+    "holeCards": {
+      "A": ["Ks", "7d"],
+      "B": ["9d", "As"]
+    },
+    "community": {
+      "flop":  ["4c", "6c", "3s"],
+      "turn":  "Qs",
+      "river": "9s"
+    }
+  }
+}

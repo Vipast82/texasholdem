@@ -1,0 +1,7 @@
+{
+    "playwright.pickLocatorCopyToClipboard": true,
+    "playwright.reuseBrowser": true,
+    "playwright.runGlobalSetupOnEachRun": true,
+    "playwright.showTrace": true,
+    "playwright.updateSnapshots": "all"
+}

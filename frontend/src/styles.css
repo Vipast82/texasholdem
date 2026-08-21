@@ -1,0 +1,1660 @@
+:root {
+  --felt: #1f5c3a;
+  --felt-dark: #174a2e;
+  --wood: #3a2417;
+  --wood-light: #5a3a24;
+  --gold: #e0b34a;
+  --cream: #f3e6c8;
+  --ink: #1c140d;
+  --danger: #b23b2e;
+  --ok: #3e8e5a;
+  --shadow: rgba(0, 0, 0, 0.35);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  font-family: 'Trebuchet MS', 'Segoe UI', system-ui, sans-serif;
+  color: var(--cream);
+  background: radial-gradient(circle at 50% 30%, var(--felt) 0%, var(--felt-dark) 60%, var(--wood) 100%);
+  min-height: 100%;
+}
+
+/* Sprint 6 — Western display font for headings (Rye, with a typewriter fallback). */
+h1,
+h2 {
+  font-family: 'Rye', 'Special Elite', 'Trebuchet MS', serif;
+  letter-spacing: 1px;
+}
+
+.app {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 20px;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.app--table {
+  justify-content: flex-start;
+}
+
+.status {
+  margin-bottom: 12px;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-weight: bold;
+}
+
+.status--offline {
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.status--error {
+  background: rgba(178, 59, 46, 0.25);
+  border: 1px solid var(--danger);
+  color: #ffd8d2;
+}
+
+.topbar {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 18px;
+  background: linear-gradient(180deg, var(--wood-light), var(--wood));
+  border: 2px solid #241509;
+  border-radius: 10px;
+  box-shadow: 0 6px 18px var(--shadow);
+  margin-bottom: 18px;
+}
+
+.topbar__title {
+  font-size: 22px;
+  font-weight: bold;
+  color: var(--gold);
+  letter-spacing: 0.5px;
+}
+
+.topbar__meta {
+  opacity: 0.85;
+  flex: 1;
+}
+
+.join {
+  width: 100%;
+  max-width: 380px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 2px solid var(--wood-light);
+  border-radius: 14px;
+  padding: 28px 26px;
+  box-shadow: 0 10px 30px var(--shadow);
+}
+
+.join__title {
+  margin: 0 0 4px;
+  font-size: 28px;
+  color: var(--gold);
+}
+
+.join__subtitle {
+  margin: 0 0 20px;
+  opacity: 0.85;
+}
+
+.field {
+  display: block;
+  margin-bottom: 16px;
+}
+
+.field span {
+  display: block;
+  font-size: 13px;
+  opacity: 0.8;
+  margin-bottom: 5px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.field input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--wood-light);
+  background: #fff;
+  color: var(--ink);
+  font-size: 15px;
+}
+
+.join__hint {
+  margin-top: 18px;
+  font-size: 12px;
+  opacity: 0.7;
+  line-height: 1.4;
+}
+
+.btn {
+  cursor: pointer;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 15px;
+  font-weight: bold;
+  background: var(--wood-light);
+  color: var(--cream);
+  transition: filter 0.12s ease, transform 0.05s ease;
+}
+
+.btn:hover {
+  filter: brightness(1.12);
+}
+
+.btn:active {
+  transform: translateY(1px);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn--primary {
+  background: var(--gold);
+  color: var(--ink);
+}
+
+.btn--ghost {
+  background: transparent;
+  border: 1px solid var(--gold);
+  color: var(--gold);
+}
+
+.btn--action {
+  background: var(--felt-dark);
+  border: 1px solid var(--gold);
+}
+
+.btn--fold {
+  background: var(--danger);
+  color: #fff;
+  width: 100%;
+}
+
+.main {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  gap: 18px;
+  width: 100%;
+}
+
+.main__left {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.table {
+  background: radial-gradient(circle at 50% 40%, #2a6e48 0%, var(--felt-dark) 70%);
+  border: 6px solid var(--wood);
+  border-radius: 18px;
+  padding: 22px;
+  box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.35), 0 8px 24px var(--shadow);
+}
+
+/* ---------------------------------------------------------------------
+   Sprint 6 — Western saloon table
+   Warm wood background with plank texture + lantern glow, oval felt center,
+   players arranged around the felt as stick figures.
+--------------------------------------------------------------------- */
+.table--saloon {
+  background:
+    /* lantern glow */
+    radial-gradient(ellipse at 50% 18%, rgba(255, 214, 130, 0.28) 0%, rgba(255, 214, 130, 0) 42%),
+    /* wood grain */
+    repeating-linear-gradient(
+      92deg,
+      #3d2513 0px,
+      #4a2e19 26px,
+      #3a2311 52px,
+      #52331c 78px
+    ),
+    #422915;
+  border: 10px solid #2a1a0c;
+  border-radius: 22px;
+  box-shadow:
+    inset 0 0 60px rgba(0, 0, 0, 0.55),
+    inset 0 2px 0 rgba(255, 220, 150, 0.18),
+    0 12px 32px var(--shadow);
+  padding: 26px 22px;
+}
+
+/* Faux hanging lantern + swinging rope via pseudo-element (no external image). */
+.table--saloon::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    /* plank seams */
+    repeating-linear-gradient(
+      0deg,
+      rgba(0, 0, 0, 0.22) 0px,
+      rgba(0, 0, 0, 0.22) 2px,
+      transparent 2px,
+      transparent 90px
+    ),
+    /* subtle vignette */
+    radial-gradient(ellipse at 50% 50%, transparent 55%, rgba(0, 0, 0, 0.4) 100%);
+  opacity: 0.6;
+}
+
+.table--saloon {
+  position: relative;
+}
+
+.table__topline {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+  font-size: 16px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.table__street {
+  color: var(--gold);
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.table__pot {
+  font-size: 18px;
+  font-weight: bold;
+}
+
+/* Oval felt in the centre of the saloon table. */
+.table__saloonbody {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+
+.table__felt {
+  justify-self: center;
+  width: min(560px, 100%);
+  aspect-ratio: 16 / 7;
+  border-radius: 50%;
+  background:
+    radial-gradient(ellipse at 50% 35%, #3d9e6b 0%, #2a7a50 45%, #1f5e3c 78%);
+  border: 14px solid #4a2e19;
+  box-shadow:
+    inset 0 0 30px rgba(0, 0, 0, 0.5),
+    inset 0 0 0 4px rgba(255, 220, 150, 0.15),
+    0 6px 18px rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.table__community {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin: 0;
+  min-height: 84px;
+  z-index: 1;
+}
+
+.table__players {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  position: relative;
+  z-index: 1;
+}
+
+.table__showdown {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.25);
+  font-size: 14px;
+}
+
+.card {
+  width: 64px;
+  height: 90px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #b9b9b9;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  font-weight: bold;
+  box-shadow: 0 3px 8px var(--shadow);
+}
+
+.card--red {
+  color: #c0271d;
+}
+
+.card--black {
+  color: #1c1c1c;
+}
+
+.card__suit {
+  line-height: 1;
+}
+
+.card--small {
+  width: 44px;
+  height: 62px;
+  font-size: 18px;
+}
+
+.holecards {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  margin: 10px 0;
+}
+
+.holecard--hidden {
+  height: 62px;
+  border: 2px dashed rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+}
+
+.seat {
+  background: rgba(0, 0, 0, 0.28);
+  border: 2px solid transparent;
+  border-radius: 12px;
+  padding: 12px;
+  text-align: center;
+  transition: border-color 0.15s ease;
+}
+
+.seat--you {
+  border-color: var(--gold);
+}
+
+.seat--acting {
+  border-color: #7fd88f;
+  box-shadow: 0 0 0 3px rgba(127, 216, 143, 0.3);
+}
+
+.seat--folded {
+  opacity: 0.5;
+}
+
+.seat__header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-weight: bold;
+}
+
+.seat__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 120px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.badge--dealer {
+  background: var(--gold);
+  color: var(--ink);
+}
+
+.badge--bot {
+  background: #2a3550;
+  color: #9fd0ff;
+  width: auto;
+  padding: 0 6px;
+  border-radius: 10px;
+  font-size: 11px;
+  letter-spacing: 0;
+}
+
+.seat--bot {
+  background: rgba(30, 42, 70, 0.35);
+}
+
+.seat__botnote {
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(159, 208, 255, 0.25);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.seat__botnote strong {
+  color: #9fd0ff;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.seat__botconf {
+  opacity: 0.7;
+}
+
+/* ======================================================================
+   Sprint 6 — stick figures, emote bubble, emote bar
+======================================================================= */
+.seat__figure {
+  position: relative;
+  display: inline-flex;
+  align-items: flex-end;
+  justify-content: center;
+  margin-bottom: 6px;
+}
+
+/* Stick figure: circular avatar head overlaid on an SVG body. */
+.stickfigure {
+  position: relative;
+  width: 84px;
+  height: 104px;
+  color: #f3e6cf; /* stroke colour of the body */
+  text-align: center;
+}
+
+.stickfigure__body {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 84px;
+  height: 104px;
+  overflow: visible;
+}
+
+.stickfigure__head {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  z-index: 2;
+  overflow: hidden;
+}
+
+/* Pose transitions on the arm/figure groups. */
+.sf-arm {
+  transition: transform 0.35s ease;
+}
+
+/* --- idle: gentle sway --------------------------------------------- */
+.stickfigure--idle .stickfigure__body {
+  animation: sfSway 3.2s ease-in-out infinite;
+}
+
+/* --- acting: right arm raised (beckoning) --------------------------- */
+.stickfigure--acting .sf-arm--right {
+  transform: rotate(-95deg);
+}
+
+/* --- folded: head bowed, arms crossed-ish --------------------------- */
+.stickfigure--folded {
+  color: #a89a83;
+}
+.stickfigure--folded .stickfigure__head {
+  transform: translateX(-50%) translateY(6px);
+  transition: transform 0.4s ease;
+}
+.stickfigure--folded .sf-arm--left {
+  transform: rotate(38deg);
+}
+.stickfigure--folded .sf-arm--right {
+  transform: rotate(-38deg);
+}
+
+/* --- all-in: both arms spread wide ---------------------------------- */
+.stickfigure--allin .sf-arm--left {
+  transform: rotate(35deg);
+}
+.stickfigure--allin .sf-arm--right {
+  transform: rotate(-35deg);
+}
+
+/* --- winning: both arms up + bounce --------------------------------- */
+.stickfigure--winning .sf-arm--left {
+  transform: rotate(55deg);
+}
+.stickfigure--winning .sf-arm--right {
+  transform: rotate(-55deg);
+}
+.stickfigure--winning .stickfigure__body {
+  animation: sfBounce 0.9s ease-in-out infinite;
+}
+
+@keyframes sfSway {
+  0%, 100% { transform: translateX(-50%) rotate(-1.5deg); }
+  50%      { transform: translateX(-50%) rotate(1.5deg); }
+}
+
+@keyframes sfBounce {
+  0%, 100% { transform: translateX(-50%) translateY(0); }
+  50%      { transform: translateX(-50%) translateY(-8px); }
+}
+
+/* Emote bubble — a speech bubble that floats above the figure's head. */
+.stickfigure__emote {
+  position: absolute;
+  top: -42px;
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 44px;
+  height: 40px;
+  padding: 2px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  background: #fff;
+  border: 2px solid var(--wood);
+  border-radius: 14px;
+  box-shadow: 0 4px 10px var(--shadow);
+  z-index: 5;
+  animation: emotePop 3s ease forwards;
+  white-space: nowrap;
+}
+
+/* little tail */
+.stickfigure__emote::after {
+  content: '';
+  position: absolute;
+  bottom: -9px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 9px solid var(--wood);
+}
+
+@keyframes emotePop {
+  0%   { opacity: 0; transform: translateX(-50%) scale(0.4); }
+  12%  { opacity: 1; transform: translateX(-50%) scale(1.08); }
+  20%  { transform: translateX(-50%) scale(1); }
+  82%  { opacity: 1; transform: translateX(-50%) scale(1); }
+  100% { opacity: 0; transform: translateX(-50%) scale(0.6) translateY(-14px); }
+}
+
+/* Winning seat emphasis. */
+.seat--winning {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 3px rgba(224, 179, 74, 0.35);
+}
+
+/* --- Emote bar ------------------------------------------------------- */
+.emotebar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 8px 10px;
+  flex-wrap: wrap;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(224, 179, 74, 0.3);
+  border-radius: 12px;
+}
+
+.emotebar__label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  opacity: 0.8;
+}
+
+.emotebar__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.emotebar__btn {
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  background: #f3e6cf;
+  border: 2px solid var(--wood);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.emotebar__btn:hover {
+  transform: translateY(-2px) scale(1.06);
+  box-shadow: 0 4px 10px var(--shadow);
+}
+
+.emotebar__btn:active {
+  transform: translateY(0) scale(0.98);
+}
+
+.field select.field__select {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--wood-light);
+  background: #fff;
+  color: var(--ink);
+  font-size: 15px;
+}
+
+.field--toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.field--toggle input {
+  width: auto;
+}
+
+.field--toggle span {
+  margin: 0;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 14px;
+  opacity: 0.95;
+}
+
+.seat__stats {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  opacity: 0.9;
+}
+
+.controls {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--wood-light);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.controls--idle {
+  align-items: center;
+  color: rgba(243, 230, 200, 0.85);
+}
+
+.controls__waiting {
+  font-size: 15px;
+}
+
+.controls__botreason {
+  font-size: 12px;
+  opacity: 0.7;
+  margin-top: 4px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.controls__row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.controls__custom {
+  gap: 8px;
+}
+
+/* ---------------------------------------------------------------- tutorial */
+.tutorial {
+  background: #1b130d;
+  border: 1px solid #3a2a1c;
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+}
+
+.tutorial__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.tutorial__head h2 {
+  font-size: 15px;
+  margin: 0;
+  letter-spacing: 0.3px;
+}
+
+.tutorial__settings {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.tutorial__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tutorial__field label {
+  font-size: 11px;
+  opacity: 0.7;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.tutorial__field select {
+  background: #241811;
+  color: inherit;
+  border: 1px solid #46352a;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
+.tutorial__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.tutorial__log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.tutorial__item {
+  background: #14100b;
+  border-left: 3px solid #c99a4d;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.tutorial__item--current {
+  border-left-color: #e9c15a;
+}
+
+.tutorial__item .tutorial__title {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.tutorial__hint {
+  margin-top: 6px;
+  padding: 6px 8px;
+  background: #241811;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #d9c49a;
+}
+
+.tutorial__empty {
+  opacity: 0.7;
+  font-size: 13px;
+  margin: 0;
+}
+
+.tutorial__paused {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: #2a1c10;
+  border: 1px solid #6b4a2a;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.tutorial__paused span {
+  font-size: 13px;
+}
+
+/* ------------------------------------------------------------------- guide */
+.guide {
+  background: #1b130d;
+  border: 1px solid #3a2a1c;
+  border-radius: 10px;
+  padding: 14px;
+  margin-bottom: 16px;
+}
+
+.guide h2 {
+  font-size: 15px;
+  margin: 0 0 4px;
+}
+
+.guide__sub {
+  font-size: 12px;
+  opacity: 0.75;
+  margin: 0 0 12px;
+}
+
+.guide__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.guide__row {
+  display: grid;
+  grid-template-columns: 18px 1fr 1fr;
+  gap: 10px;
+  align-items: center;
+  background: #14100b;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.guide__rank {
+  font-weight: 700;
+  color: #e9c15a;
+  text-align: center;
+}
+
+.guide__name {
+  font-weight: 600;
+}
+
+.guide__example {
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
+}
+
+.guide__note {
+  margin: 10px 0 0;
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.amount {
+  flex: 1;
+  min-width: 120px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--wood-light);
+  background: #fff;
+  color: var(--ink);
+  font-size: 15px;
+}
+
+.chat {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--wood-light);
+  border-radius: 12px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  height: 460px;
+}
+
+.chat__title {
+  margin: 0 0 10px;
+  color: var(--gold);
+  font-size: 16px;
+}
+
+.chat__log {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chat__empty {
+  opacity: 0.6;
+  font-style: italic;
+}
+
+.chat__msg {
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.chat__from {
+  color: var(--gold);
+  font-weight: bold;
+  margin-right: 6px;
+}
+
+.chat__form {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.chat__form input {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--wood-light);
+  background: #fff;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+/* ------------------------------------------------------------- HUD odds */
+.table__hudtoggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  opacity: 0.9;
+  cursor: pointer;
+}
+
+.table__hudtoggle input {
+  width: auto;
+  accent-color: var(--gold);
+}
+
+.table__spectatorbadge {
+  padding: 2px 10px;
+  border-radius: 10px;
+  background: #2a3550;
+  color: #9fd0ff;
+  font-size: 12px;
+  letter-spacing: 0.3px;
+}
+
+.hud {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  margin: 8px 0 2px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.hud__win,
+.hud__tie,
+.hud__lose {
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.hud__win {
+  color: #7fe39a;
+}
+
+.hud__tie {
+  color: #e0b34a;
+}
+
+.hud__lose {
+  color: #ff9d92;
+}
+
+/* ---------------------------------------------------------- spectator bar */
+.spectatorbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  background: linear-gradient(180deg, #2a3550, #1c2438);
+  border: 1px solid #3a4a6b;
+  border-radius: 12px;
+  color: #dbe7ff;
+}
+
+.spectatorbar__label {
+  font-weight: bold;
+  color: #9fd0ff;
+  letter-spacing: 0.3px;
+}
+
+.spectatorbar__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.spectatorbar__toggle input {
+  width: auto;
+  accent-color: var(--gold);
+}
+
+.spectatorbar__note {
+  margin-left: auto;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+/* ---------------------------------------------------------- hand history */
+.history {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--wood-light);
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.history__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.history__head h2 {
+  margin: 0;
+  color: var(--gold);
+  font-size: 16px;
+}
+
+.history__tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.history__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.history__toggle input {
+  width: auto;
+  accent-color: var(--gold);
+}
+
+.history__empty {
+  opacity: 0.6;
+  font-style: italic;
+  font-size: 14px;
+}
+
+.history__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.history__item {
+  background: #14100b;
+  border-left: 3px solid #c99a4d;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.history__meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.history__board {
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
+}
+
+.history__win {
+  margin-top: 4px;
+  opacity: 0.95;
+}
+
+.history__reason {
+  margin-top: 2px;
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.history__note {
+  margin: 10px 0 0;
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+@media (max-width: 820px) {
+  .main {
+    grid-template-columns: 1fr;
+  }
+
+  .chat {
+    height: 320px;
+  }
+}
+
+/* ==================================================================== */
+/*  Sprint 5 — avatars, dealer button, cropper, settings, western pass  */
+/* ==================================================================== */
+
+/* ---- Per-seat avatar (round, western "bounty badge" chrome) ---------- */
+.seatavatar {
+  display: inline-block;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background-color: #14100b;
+  background-position: center;
+  box-shadow:
+    0 0 0 2px var(--gold),
+    0 0 0 4px #241509,
+    inset 0 0 6px rgba(0, 0, 0, 0.5);
+  filter: drop-shadow(0 2px 3px var(--shadow));
+}
+
+.seatavatar--empty {
+  background-image: none;
+  box-shadow:
+    0 0 0 2px rgba(224, 179, 74, 0.4),
+    0 0 0 4px #241509;
+}
+
+.seat__header {
+  gap: 10px;
+}
+
+/* ---- Animated dealer button ----------------------------------------- */
+.dealerbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.dealerbtn__disc {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  color: var(--gold);
+  background: radial-gradient(circle at 35% 30%, #f4d68a, var(--gold) 55%, #a97e2e);
+  border: 2px solid #241509;
+  box-shadow: 0 2px 5px var(--shadow), inset 0 0 4px rgba(255, 255, 255, 0.4);
+  font-weight: bold;
+}
+
+.dealerbtn__text {
+  font-size: 15px;
+  font-weight: bold;
+  color: #241509;
+}
+
+.dealerbtn--pulse {
+  animation: dealerPulse 2.4s ease-in-out infinite;
+  transform-origin: center;
+}
+
+@keyframes dealerPulse {
+  0%,
+  100% {
+    transform: rotate(-8deg) scale(1);
+  }
+  50% {
+    transform: rotate(8deg) scale(1.08);
+  }
+}
+
+/* ---- Avatar cropper -------------------------------------------------- */
+.cropper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--wood-light);
+  border-radius: 12px;
+}
+
+.cropper__preview {
+  position: relative;
+  width: 160px;
+  height: 160px;
+}
+
+.cropper__img {
+  width: 160px;
+  height: 160px;
+  border-radius: 50%;
+  background-color: #0c0906;
+  background-repeat: no-repeat;
+  background-position: center;
+  box-shadow: 0 0 0 3px var(--gold), 0 0 0 6px #241509, inset 0 0 12px rgba(0, 0, 0, 0.6);
+  cursor: grab;
+  touch-action: none;
+}
+
+.cropper__img--drag {
+  cursor: grabbing;
+}
+
+.cropper__ring {
+  position: absolute;
+  inset: -6px;
+  border: 2px dashed rgba(224, 179, 74, 0.5);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.cropper__file {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.cropper__zoom {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  max-width: 240px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  opacity: 0.85;
+}
+
+.cropper__zoom input[type='range'] {
+  flex: 1;
+  accent-color: var(--gold);
+}
+
+.cropper__hint {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.7;
+  text-align: center;
+}
+
+.cropper__error {
+  margin: 0;
+  font-size: 13px;
+  color: #ff9d92;
+  font-weight: bold;
+}
+
+.cropper__actions {
+  display: flex;
+  gap: 10px;
+}
+
+/* ---- Settings panel (sound + avatar) --------------------------------- */
+.panel.settings {
+  width: 100%;
+  max-width: 380px;
+  margin: 16px 0 0;
+  background: rgba(0, 0, 0, 0.35);
+  border: 2px solid var(--wood-light);
+  border-radius: 14px;
+  padding: 18px 22px;
+  box-shadow: 0 8px 24px var(--shadow);
+}
+
+.panel__title {
+  margin: 0 0 14px;
+  font-size: 16px;
+  color: var(--gold);
+  letter-spacing: 0.5px;
+}
+
+.settings__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 24px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.settings__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.settings__toggle input {
+  width: auto;
+  accent-color: var(--gold);
+}
+
+.settings__volume {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+}
+
+.settings__volume input[type='range'] {
+  width: 140px;
+  accent-color: var(--gold);
+}
+
+.settings__volume em {
+  font-style: normal;
+  min-width: 38px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
+.settings__avatar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(90, 58, 36, 0.6);
+}
+
+.settings__avatarlabel {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  opacity: 0.8;
+}
+
+.settings__avatarpreview {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background-size: cover;
+  background-position: center;
+  box-shadow: 0 0 0 2px var(--gold), 0 0 0 4px #241509;
+}
+
+.settings__avataractions {
+  display: flex;
+  gap: 10px;
+}
+
+.settings__error {
+  margin: 0;
+  font-size: 13px;
+  color: #ff9d92;
+  font-weight: bold;
+}
+
+/* =====================================================================
+   Sprint 5 — Art Pass: card animations, dealer shuffle, Kenney back
+   ===================================================================== */
+
+/* --- Card back with Kenney CC0 pixel art --------------------------- */
+.card--back {
+  background:
+    url('/assets/cards/card_back.png') center / contain no-repeat,
+    repeating-linear-gradient(45deg, #6d4526 0 8px, #57371f 8px 16px);
+  background-color: #3a2514;
+  border: 2px solid #2f1d10;
+  box-shadow: 0 3px 10px var(--shadow), inset 0 0 12px rgba(0,0,0,0.3);
+}
+
+/* --- Deal-in animation: card flies from the dealer / centre -------- */
+@keyframes cardDealIn {
+  0% {
+    opacity: 0;
+    transform: translate(0, -40px) rotate(-12deg) scale(0.4);
+  }
+  60% {
+    opacity: 1;
+    transform: translate(2px, 4px) rotate(3deg) scale(1.02);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(0, 0) rotate(0deg) scale(1);
+  }
+}
+
+.card--deal {
+  animation: cardDealIn 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Stagger delay for community cards so they fan out one by one */
+.card--deal:nth-child(1) { animation-delay: 0.00s; }
+.card--deal:nth-child(2) { animation-delay: 0.12s; }
+.card--deal:nth-child(3) { animation-delay: 0.24s; }
+.card--deal:nth-child(4) { animation-delay: 0.36s; }
+.card--deal:nth-child(5) { animation-delay: 0.48s; }
+
+/* --- Flip-in animation: 3D Y-axis rotation for revealed community --- */
+@keyframes cardFlipIn {
+  0% {
+    opacity: 0;
+    transform: perspective(300px) rotateY(90deg) scale(0.9);
+  }
+  50% {
+    opacity: 1;
+    transform: perspective(300px) rotateY(-10deg) scale(1.04);
+  }
+  100% {
+    opacity: 1;
+    transform: perspective(300px) rotateY(0deg) scale(1);
+  }
+}
+
+.card--flip {
+  animation: cardFlipIn 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-style: preserve-3d;
+  backface-visibility: hidden;
+}
+
+.card--flip:nth-child(1) { animation-delay: 0.00s; }
+.card--flip:nth-child(2) { animation-delay: 0.15s; }
+.card--flip:nth-child(3) { animation-delay: 0.30s; }
+
+/* --- Table shuffle shake: quick wiggle when hand starts ------------- */
+@keyframes tableShuffle {
+  0%, 100% { transform: translateX(0) rotate(0deg); }
+  15%      { transform: translateX(-4px) rotate(-0.4deg); }
+  30%      { transform: translateX(4px)  rotate(0.4deg);  }
+  45%      { transform: translateX(-3px) rotate(-0.3deg); }
+  60%      { transform: translateX(3px)  rotate(0.3deg);  }
+  75%      { transform: translateX(-2px) rotate(-0.15deg);}
+  90%      { transform: translateX(1px)  rotate(0.1deg);  }
+}
+
+.table--shuffling {
+  animation: tableShuffle 0.6s ease-in-out both;
+}
+
+/* --- Enhanced hidden card (opponent's back) -------------------------- */
+.holecard--hidden {
+  height: 62px;
+  width: 44px;
+  border-radius: 8px;
+  background:
+    url('/assets/cards/card_back.png') center / contain no-repeat,
+    repeating-linear-gradient(45deg, #5a3820 0 8px, #4a2c18 8px 16px);
+  background-color: #3a2514;
+  border: 2px solid #2f1d10;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+  opacity: 0.7;
+}
+
+/* --- Pot glow on new hand -------------------------------------------- */
+@keyframes potGlow {
+  0%   { text-shadow: 0 0 0 rgba(255, 215, 0, 0); }
+  50%  { text-shadow: 0 0 14px rgba(255, 215, 0, 0.7); }
+  100% { text-shadow: 0 0 0 rgba(255, 215, 0, 0); }
+}
+
+.table__pot--glow {
+  animation: potGlow 1.2s ease-in-out 1;
+}
+
+/* --- Reduced motion: disable all animations for users who opt out --- */
+@media (prefers-reduced-motion: reduce) {
+  .card--deal,
+  .card--flip,
+  .table--shuffling,
+  .dealerbtn--pulse,
+  .table__pot--glow,
+  .stickfigure--idle .stickfigure__body,
+  .stickfigure--winning .stickfigure__body,
+  .chipstack__pile--push,
+  .stickfigure__emote {
+    animation: none !important;
+  }
+  /* Keep the emote bubble readable (no pop/fade) but still visible + dismissible. */
+  .stickfigure__emote {
+    opacity: 1;
+  }
+}
+
+/* --- Sprint 6 a11y: visible focus indicator ----------------------------- */
+/* Every interactive control gets a high-contrast, always-visible focus ring
+   (keyboard users). We use :focus-visible so mouse clicks stay clean. */
+.btn:focus-visible,
+input:focus-visible,
+select:focus-visible,
+button:focus-visible,
+a:focus-visible,
+[role='button']:focus-visible {
+  outline: 3px solid var(--gold);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 6px rgba(224, 179, 74, 0.35);
+}
+
+/* --- Sprint 6 a11y: high-contrast mode ---------------------------------- */
+/* Honor the user's OS "more contrast" setting (Windows High Contrast and
+   prefers-contrast). Strengthen borders, text, and button outlines so the
+   saloon theme never fights the user's accessibility preferences. */
+@media (prefers-contrast: more) {
+  :root {
+    --cream: #ffffff;
+    --gold: #ffe08a;
+    --danger: #ff5a4d;
+    --ok: #35c97a;
+  }
+  body {
+    color: var(--cream);
+  }
+  .btn,
+  .seat,
+  .panel,
+  .settings,
+  .tutorial,
+  .history,
+  .chat,
+  .guide,
+  .controls,
+  .spectatorbar,
+  .emotebar {
+    border: 2px solid var(--cream);
+  }
+  .btn {
+    border-width: 2px;
+    font-weight: 700;
+  }
+  .card,
+  .card--back {
+    border-width: 2px;
+  }
+  .status,
+  .topbar,
+  .history__item,
+  .chat__msg {
+    border: 2px solid rgba(255, 255, 255, 0.7);
+  }
+}
+
+/* Windows High Contrast / forced colors: let the OS own the palette. */
+@media (forced-colors: active) {
+  .btn,
+  .seat,
+  .panel,
+  .card,
+  .status {
+    border: 1px solid ButtonText;
+    color: ButtonText;
+  }
+}
+
+/* --- Sprint 6 a11y: skip link ------------------------------------------- */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 1000;
+  padding: 8px 16px;
+  background: var(--gold);
+  color: var(--ink);
+  font-weight: bold;
+  border-radius: 0 0 6px 0;
+}
+.skip-link:focus {
+  left: 0;
+}
+

@@ -1,0 +1,12 @@
+{
+  "eventKey": "deal",
+  "title": "tut.deal.title",
+  "messages": {
+    "concise": "tut.deal.concise",
+    "normal": "tut.deal.normal",
+    "detailed": "tut.deal.detailed"
+  },
+  "highlight": ["holecards", "pot"],
+  "pause": false,
+  "strategyHint": { "enabled": false, "text": "tut.hint.disabled" }
+}

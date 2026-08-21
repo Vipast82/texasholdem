@@ -1,0 +1,12 @@
+{
+  "eventKey": "flop",
+  "title": "tut.flop.title",
+  "messages": {
+    "concise": "tut.flop.concise",
+    "normal": "tut.flop.normal",
+    "detailed": "tut.flop.detailed"
+  },
+  "highlight": ["community", "street"],
+  "pause": false,
+  "strategyHint": { "enabled": true, "text": "tut.hint.text" }
+}

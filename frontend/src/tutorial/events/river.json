@@ -1,0 +1,12 @@
+{
+  "eventKey": "river",
+  "title": "tut.river.title",
+  "messages": {
+    "concise": "tut.river.concise",
+    "normal": "tut.river.normal",
+    "detailed": "tut.river.detailed"
+  },
+  "highlight": ["community", "street"],
+  "pause": false,
+  "strategyHint": { "enabled": true, "text": "tut.hint.text" }
+}
