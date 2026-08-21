@@ -1,0 +1,42 @@
+# Sprint 6 — end-to-end smoke (MANUAL ONLY).
+#
+# This is deliberately separate from ci.yml (which is the fast, always-green
+# gate). e2e boots the *production* server + built frontend and drives it over
+# real HTTP + Socket.IO (health, served index.html, join/startHand privacy),
+# validating the shipping artifact end-to-end.
+#
+# It is `workflow_dispatch`-only so it never runs on a push/PR and can't flake
+# the main gate. Trigger it from the Actions tab (or `gh workflow run e2e.yml`).
+name: E2E (manual)
+
+on:
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  e2e:
+    name: production smoke (http + socket)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend (production)
+        run: npm run build
+
+      - name: Boot production server + run e2e smoke
+        run: node scripts/ci-e2e-smoke.mjs
+        env:
+          SMOKE_PORT: 3105

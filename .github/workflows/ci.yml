@@ -1,0 +1,57 @@
+# Sprint 6 — continuous integration (runs on every push + pull request).
+# Fast + dependency-light: installs once, then lints, unit/tests (shared +
+# server + frontend incl. jsdom a11y + i18n parity), and builds the frontend.
+#
+# The Playwright/browser e2e is deliberately kept OUT of this fast gate and lives
+# in .github/workflows/e2e.yml as a manual (workflow_dispatch) job so the
+# always-on CI stays quick and reliably green.
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  # Allows re-running CI manually from the Actions tab (e.g. after a flake).
+  workflow_dispatch:
+
+# A newer Node for the frontend toolchain. 20 is LTS.
+env:
+  NODE_VERSION: '20'
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: lint · test · build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test (shared + server + frontend, incl. a11y + i18n parity)
+        run: npm test
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Upload frontend build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          if-no-files-found: error
