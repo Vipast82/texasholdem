@@ -384,6 +384,7 @@ h2 {
 }
 
 .seat {
+  position: relative;
   background: rgba(0, 0, 0, 0.28);
   border: 2px solid transparent;
   border-radius: 12px;
@@ -448,6 +449,31 @@ h2 {
 
 .seat--bot {
   background: rgba(30, 42, 70, 0.35);
+}
+
+.seat__removebot {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid rgba(159, 208, 255, 0.4);
+  border-radius: 50%;
+  background: #2a3550;
+  color: #9fd0ff;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.85;
+  z-index: 2;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.seat__removebot:hover {
+  opacity: 1;
+  transform: scale(1.1);
+  background: #3a4a70;
 }
 
 .seat__botnote {
@@ -616,11 +642,8 @@ h2 {
   100% { opacity: 0; transform: translateX(-50%) scale(0.6) translateY(-14px); }
 }
 
-/* Winning seat emphasis. */
-.seat--winning {
-  border-color: var(--gold);
-  box-shadow: 0 0 0 3px rgba(224, 179, 74, 0.35);
-}
+/* Winning seat emphasis: see `.seat--winning` (winner celebration) further
+   down — a one-shot spotlight pop + continuous golden pulse. */
 
 /* --- Emote bar ------------------------------------------------------- */
 .emotebar {
@@ -743,6 +766,59 @@ h2 {
 
 .controls__custom {
   gap: 8px;
+}
+
+/* Sprint 8 — "add a CPU player" control in the idle state. */
+.controls__idle-row {
+  width: 100%;
+  justify-content: center;
+  align-items: center;
+}
+
+.controls__idle-sep {
+  width: 1px;
+  height: 24px;
+  background: var(--wood-light);
+  margin: 0 4px;
+  opacity: 0.5;
+}
+
+.controls__cpu {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--wood-light);
+}
+
+.controls__cpu-label {
+  font-size: 13px;
+  opacity: 0.8;
+  white-space: nowrap;
+}
+
+.controls__cpu-select {
+  background: #1b130d;
+  color: rgba(243, 230, 200, 0.95);
+  border: 1px solid var(--wood-light);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.controls__cpu-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.controls__hint {
+  font-size: 12px;
+  opacity: 0.7;
+  margin: 0;
 }
 
 /* ---------------------------------------------------------------- tutorial */
@@ -1554,13 +1630,55 @@ h2 {
   animation: potGlow 1.2s ease-in-out 1;
 }
 
+/* --- Runout slow reveal: flop → turn → river on a cinematic beat ---------
+   An all-in runout is a single snapshot (turn + river + showdown at once), so
+   we animate the flip with per-card delays (set inline in Table.jsx). The
+   deal-in is suppressed so only the flip (with its longer delay) drives the
+   reveal — otherwise the two animations would fight over transform/opacity. */
+.card--flip.card--slow-reveal {
+  animation: cardFlipIn 1s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.card--slow-reveal.card--deal,
+.card--deal.card--slow-reveal {
+  animation: none !important;
+}
+
+/* --- Winner celebration --------------------------------------------------
+   Fires the moment the hand resolves (instant for normal hands; delayed on a
+   runout until the river lands, driven by `winnerVisible` in Table.jsx). A
+   one-shot spotlight pop on the figure + a continuous golden pulse on the seat
+   so the winner stays obvious while the board is held until the next hand. */
+@keyframes winnerPop {
+  0%   { transform: translateY(0) scale(1); }
+  40%  { transform: translateY(-14px) scale(1.14); }
+  70%  { transform: translateY(-4px)  scale(1.06); }
+  100% { transform: translateY(0)    scale(1.1); }
+}
+
+@keyframes winnerPulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(224, 179, 74, 0.55), 0 0 18px rgba(255, 215, 0, 0.35); }
+  50%      { box-shadow: 0 0 0 4px rgba(224, 179, 74, 0.9),  0 0 30px rgba(255, 215, 0, 0.7); }
+}
+
+.seat--winning {
+  border-color: var(--gold);
+  animation: winnerPulse 1.6s ease-in-out infinite;
+}
+
+.seat--winning .seat__figure {
+  animation: winnerPop 0.85s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
 /* --- Reduced motion: disable all animations for users who opt out --- */
 @media (prefers-reduced-motion: reduce) {
   .card--deal,
   .card--flip,
+  .card--slow-reveal,
   .table--shuffling,
   .dealerbtn--pulse,
   .table__pot--glow,
+  .seat--winning,
+  .seat--winning .seat__figure,
   .stickfigure--idle .stickfigure__body,
   .stickfigure--winning .stickfigure__body,
   .chipstack__pile--push,
@@ -1656,5 +1774,219 @@ a:focus-visible,
 }
 .skip-link:focus {
   left: 0;
+}
+
+/* ==========================================================================
+   Sprint 7 — collapsible panels, history card graphics, bet chip piles
+   ========================================================================== */
+
+/* --- Collapsible panels --------------------------------------------------- */
+.collapsible {
+  margin: 16px 0 0;
+}
+
+.collapsible__header,
+.collapsible__bare-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+  font: inherit;
+  color: var(--gold);
+  background: none;
+  border: none;
+  border-bottom: 1px solid rgba(224, 179, 74, 0.35);
+  padding: 4px 2px 8px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.collapsible--bare .collapsible__bare-toggle {
+  justify-content: flex-end;
+  padding: 0 2px 4px;
+  border-bottom: none;
+}
+
+.collapsible__bare-toggle {
+  font-size: 15px;
+}
+
+.collapsible__title {
+  font-size: 16px;
+}
+
+.collapsible__chevron {
+  font-size: 18px;
+  line-height: 1;
+  opacity: 0.9;
+}
+
+.collapsible__body {
+  margin-top: 8px;
+}
+
+.collapsible__header:focus-visible,
+.collapsible__bare-toggle:focus-visible {
+  outline: 3px solid var(--gold);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* --- Card graphics (history panel) ---------------------------------------- */
+.cardrow {
+  display: inline-flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.cardtile {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 42px;
+  border-radius: 5px;
+  background: #fff;
+  border: 1px solid #b9b9b9;
+  box-shadow: 0 2px 5px var(--shadow);
+  overflow: hidden;
+  line-height: 1;
+}
+
+.cardtile--red {
+  color: #c0271d;
+}
+
+.cardtile--black {
+  color: #1c1c1c;
+}
+
+.cardtile__rank {
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.cardtile__suit {
+  font-size: 12px;
+}
+
+.cardtile--empty {
+  width: 30px;
+  height: 42px;
+  border: 2px dashed rgba(255, 255, 255, 0.2);
+  background: transparent;
+  box-shadow: none;
+}
+
+.history__item {
+  margin-bottom: 10px;
+}
+
+.history__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+
+.history__win {
+  opacity: 0.95;
+}
+
+.history__hand,
+.history__board {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(224, 179, 74, 0.25);
+}
+
+.history__handlabel,
+.history__boardlabel {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  opacity: 0.7;
+}
+
+.history__handname {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--gold);
+}
+
+/* --- Bet chip pile -------------------------------------------------------- */
+.seat__betchips {
+  display: flex;
+  justify-content: center;
+  margin: 6px 0;
+  min-height: 18px;
+}
+
+.betchips {
+  display: inline-flex;
+  flex-direction: column-reverse; /* first disc at the bottom of the pile */
+  align-items: center;
+  gap: 3px;
+  padding: 6px 4px 2px;
+}
+
+.betchips__disc {
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.7);
+  box-shadow:
+    inset 0 0 0 2px rgba(0, 0, 0, 0.25),
+    0 1px 2px rgba(0, 0, 0, 0.45);
+  position: relative;
+}
+
+/* chip-stripe ring (the classic casino edge) */
+.betchips__disc::after {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  border-radius: 50%;
+  border: 2px dashed rgba(255, 255, 255, 0.55);
+}
+
+.betchips__total {
+  align-self: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--gold);
+  margin-top: 2px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+@keyframes betChipPush {
+  0%   { transform: translateY(-8px) scale(0.8); opacity: 0; }
+  55%  { transform: translateY(2px)  scale(1.05); opacity: 1; }
+  100% { transform: translateY(0) scale(1); }
+}
+
+.betchips--push {
+  animation: betChipPush 0.4s ease-out both;
+}
+
+/* --- Reduced motion: disable the new animations too ----------------------- */
+@media (prefers-reduced-motion: reduce) {
+  .betchips--push {
+    animation: none !important;
+  }
+}
+
+/* --- High-contrast: keep the chip + card graphics legible ----------------- */
+body.high-contrast .betchips__disc,
+body.high-contrast .cardtile {
+  border-width: 3px;
 }
 

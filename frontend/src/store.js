@@ -196,7 +196,22 @@ export const useGameStore = create((set, get) => ({
     socket.on('botAction', this._onBotAction);
     socket.on('gameEvent', this._onGameEvent);
     socket.on('handRecord', this._onHandRecord);
+    socket.on('emote', this._onEmote);
     socket.on('connect_error', this._onError);
+  },
+
+  /**
+   * Sprint 7 — server-relayed emote. Render the bubble for the target seat,
+   * EXCEPT when it's my own emote: I already rendered my own bubble locally in
+   * `sendEmote`, and socket.io also echoes the room broadcast back to me, so
+   * skipping my own id here prevents a double bubble for the sender while every
+   * other seat still sees the bubble it was relayed to.
+   */
+  _onEmote({ playerId, code }) {
+    const valid = validateEmote(code);
+    if (!valid || !playerId) return;
+    if (playerId === get().playerId) return; // my own emote is already rendered locally
+    get().showEmoteBubble(playerId, valid);
   },
 
   async join(tableId, name, options = {}) {
@@ -212,6 +227,28 @@ export const useGameStore = create((set, get) => ({
 
   async startHand(seed) {
     const res = await emitAck('startHand', seed != null ? { seed } : {});
+    if (!res.ok) set({ error: res.error });
+    return res;
+  },
+
+  /**
+   * Sprint 8 — seat an AI opponent at-will (mid-session). The server already
+   * supports `addBot`; this action just emits it with the current tableId so
+   * a solo human can fill an empty seat without leaving and re-joining.
+   */
+  async addBot(botDifficulty = 'normal') {
+    const tableId = get().tableId;
+    if (!tableId) return { ok: false, error: 'join a table first' };
+    const res = await emitAck('addBot', { tableId, botDifficulty });
+    if (!res.ok) set({ error: res.error });
+    return res;
+  },
+
+  /** Remove an AI player (only bots can be removed; blocked mid-hand). */
+  async removeBot(botId) {
+    const tableId = get().tableId;
+    if (!tableId) return { ok: false, error: 'join a table first' };
+    const res = await emitAck('removeBot', { tableId, botId });
     if (!res.ok) set({ error: res.error });
     return res;
   },
@@ -332,6 +369,22 @@ export const useGameStore = create((set, get) => ({
   },
 
   /**
+   * Push my current avatar reference to the server so EVERY OTHER seat at my
+   * table can fetch + render it (Sprint 7 sharing). `avatarMeta` is only sent
+   * once at `joinTable`; without this, a (re)upload would update only MY seat —
+   * the blob is POSTed to /avatars/:id, but the server never learns the new id
+   * for my seat, so the other seats keep resolving the stale/missing id and
+   * fall back to the default stick figure. Best-effort + no-op when not
+   * seated, so it is safe to call on every commit/reset.
+   * @param {object|null} avatarMeta small `{avatarId, kind, crop}` or null to clear
+   */
+  updateAvatar(avatarMeta) {
+    const st = get();
+    if (!st.tableId || !st.playerId) return; // not joined yet — joinTable carries it
+    socket.emit('updateAvatar', { avatarMeta });
+  },
+
+  /**
    * Commit an uploaded + cropped avatar. Persists the blob (IndexedDB), records
    * the avatarId in the profile, and exposes the object URL for immediate
    * render. The `avatarMeta` (small) is what later goes over the wire at join.
@@ -366,6 +419,27 @@ export const useGameStore = create((set, get) => ({
       }));
       // Autosave the small profile (avatarId) so a reload still knows we have one.
       await autosave.saveProfile({ ...get().profile, avatarId: meta.avatarId });
+      // Sprint 7 — SHARE the avatar with other seats. The blob still lives in
+      // THIS client's IndexedDB, but we also POST the raw bytes to the server so
+      // the other players (who do NOT have our blob) can fetch + render it.
+      // Best-effort: a failure here must never block the local avatar save.
+      if (typeof fetch !== 'undefined' && file && typeof file.arrayBuffer === 'function') {
+        try {
+          const buf = await file.arrayBuffer();
+          const mime = (file.type || 'image/*').split(';')[0].trim();
+          await fetch(`/avatars/${encodeURIComponent(meta.avatarId)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': mime },
+            body: buf
+          });
+        } catch (err) {
+          // ignore — other seats just fall back to the default avatar
+        }
+      }
+      // Sprint 7 — let the OTHER seats see it live: attach the new avatarMeta to
+      // my player on the server (joinTable only carried it once). No-op if I'm
+      // not seated yet, in which case the next joinTable carries it.
+      get().updateAvatar({ avatarId: meta.avatarId, kind: 'upload', crop: crop || null });
       // The small metadata object is the ONLY thing allowed over the wire.
       return { avatarId: meta.avatarId, kind: 'upload', crop: crop || null };
     } catch (err) {
@@ -384,6 +458,9 @@ export const useGameStore = create((set, get) => ({
         profile: { ...s.profile, avatarId: null }
       }));
       await autosave.saveProfile({ ...get().profile, avatarId: null });
+      // Tell the other seats to drop my avatar too (otherwise they keep
+      // resolving the old avatarId against the still-cached shared blob).
+      get().updateAvatar(null);
     } catch (err) {
       // best-effort
     }
@@ -422,15 +499,32 @@ export const useGameStore = create((set, get) => ({
   },
 
   /**
-   * Sprint 6 — fire an emote bubble above a player's stick figure.
-   * Purely local: no server round-trip. Auto-clears after 3 s.
+   * Sprint 7 — fire an emote bubble above a player's stick figure AND relay it
+   * to the table so every OTHER seat sees it too (previously local-only).
+   * Auto-clears after 3 s. Safe to call for the local player or a remote one.
    */
   sendEmote(playerId, code) {
     const valid = validateEmote(code);
     if (!valid) return;
-    const glyph = emoteGlyph(valid);
+    get().showEmoteBubble(playerId, valid);
+    // Relay to the server (best-effort; the ack is ignored). The server re-emits
+    // to the room, so the other seats render their own bubble via `_onEmote`.
+    try {
+      socket.emit('emote', { playerId, code: valid });
+    } catch (err) {
+      // ignore — the local bubble already showed
+    }
+  },
+
+  /**
+   * Render an emote bubble for `playerId` (shared by local sends and the
+   * server relay). Auto-dismisses after 3 s, re-arming a fresh timer on
+   * repeated sends.
+   */
+  showEmoteBubble(playerId, code) {
+    const glyph = emoteGlyph(code);
     const ts = Date.now();
-    set((s) => ({ emotes: { ...s.emotes, [playerId]: { code: valid, glyph, ts } } }));
+    set((s) => ({ emotes: { ...s.emotes, [playerId]: { code, glyph, ts } } }));
     // Auto-dismiss after 3 s (guard against stale timers)
     if (globalThis.clearTimeout) {
       clearTimeout(get()._emoteTimers && get()._emoteTimers[playerId]);

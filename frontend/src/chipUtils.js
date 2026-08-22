@@ -62,3 +62,19 @@ export function decomposeStack(total, denominations = [1, 5, 25, 100, 500], maxD
 export function chipDiscs(total, denominations = [1, 5, 25, 100, 500], maxDiscs = 7) {
   return decomposeStack(total, denominations, maxDiscs);
 }
+
+/**
+ * Sprint 7 — chip DISCS for a single BET (the amount posted this street).
+ * Decomposes the bet into its component denomination discs, largest first, so a
+ * 300-chip bet renders as six green 50-chip discs (or a 500 + 25 + 25, etc.),
+ * each disc colored by its denomination. The pile grows taller as the bet
+ * grows. Capped at `maxDiscs` to keep a full-street max bet a tidy stack.
+ *
+ * @param {number} amount the bet amount to visualize
+ * @param {number[]} denominations e.g. [1, 5, 25, 100, 500]
+ * @param {number} [maxDiscs=12] cap on discs rendered for one bet
+ * @returns {Array<{ value: number, count: number, color: string }>}
+ */
+export function betChips(amount, denominations = [1, 5, 25, 100, 500], maxDiscs = 12) {
+  return decomposeStack(amount, denominations, maxDiscs);
+}

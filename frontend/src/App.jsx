@@ -4,6 +4,7 @@ import JoinScreen from './components/JoinScreen.jsx';
 import Table from './components/Table.jsx';
 import ChatPanel from './components/ChatPanel.jsx';
 import Controls from './components/Controls.jsx';
+import Collapsible from './components/Collapsible.jsx';
 import TutorialPanel from './components/TutorialPanel.jsx';
 import HandRankingGuide from './components/HandRankingGuide.jsx';
 import SpectatorBar from './components/SpectatorBar.jsx';
@@ -71,15 +72,27 @@ export default function App() {
         <div className="main__left">
           {error && <div className="status status--error">{error}</div>}
           {spectator.active && <SpectatorBar />}
-          {snapshot && <TutorialPanel />}
+          {snapshot && (
+            <Collapsible id="tutorial" title={t('tutorial.panel')} showHeader={false}>
+              <TutorialPanel />
+            </Collapsible>
+          )}
           {snapshot && <Table snapshot={snapshot} />}
           {snapshot && !spectator.active && <Controls snapshot={snapshot} />}
         </div>
         <aside className="main__right">
-          <SettingsPanel />
-          <HandRankingGuide />
-          <HistoryPanel />
-          <ChatPanel />
+          <Collapsible id="settings" title={t('settings.title')} showHeader={false}>
+            <SettingsPanel />
+          </Collapsible>
+          <Collapsible id="guide" title={t('guide.title')} showHeader={false}>
+            <HandRankingGuide />
+          </Collapsible>
+          <Collapsible id="history" title={t('history.title')} showHeader={false}>
+            <HistoryPanel />
+          </Collapsible>
+          <Collapsible id="chat" title={t('chat.title')} showHeader={false}>
+            <ChatPanel />
+          </Collapsible>
         </aside>
       </div>
     </div>

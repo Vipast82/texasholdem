@@ -37,7 +37,7 @@ describe('validateAvatarFile', () => {
   });
 
   it('rejects a non-GIF type', () => {
-    const r = validateAvatarFile({ type: 'image/png', size: 10 });
+    const r = validateAvatarFile({ type: 'text/plain', size: 10 });
     expect(r.ok).toBe(false);
     expect(r.code).toBe('type');
   });
@@ -48,8 +48,11 @@ describe('validateAvatarFile', () => {
     expect(r.code).toBe('size');
   });
 
-  it('only accepts image/gif', () => {
-    expect(ACCEPTED_TYPES).toEqual(['image/gif']);
+  it('accepts common image types (gif, png, jpeg, webp, svg)', () => {
+    for (const type of ['image/gif', 'image/png', 'image/jpeg', 'image/webp', 'image/svg+xml']) {
+      expect(ACCEPTED_TYPES).toContain(type);
+      expect(validateAvatarFile({ type, size: 10 }).ok).toBe(true);
+    }
   });
 });
 
@@ -96,7 +99,7 @@ describe('AvatarStore', () => {
 
   it('uploadAvatar rejects invalid files', async () => {
     const s = store();
-    await expect(s.uploadAvatar({ type: 'image/png', size: 10 })).rejects.toThrow(/invalid/);
+    await expect(s.uploadAvatar({ type: 'text/plain', size: 10 })).rejects.toThrow(/invalid/);
     await expect(s.uploadAvatar(fakeGif(MAX_AVATAR_BYTES + 1))).rejects.toThrow(/invalid/);
   });
 

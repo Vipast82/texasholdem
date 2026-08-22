@@ -42,6 +42,50 @@ const distDir = path.resolve(__dirname, '../../frontend/dist');
 app.use(express.static(distDir));
 app.get('/health', (req, res) => res.json({ ok: true, name: 'saloon-server' }));
 
+// ----------------------------------------------------------------- avatars
+// Sprint 7: avatar SHARING. The avatar binary still never lives in IndexedDB
+// on the wire for OTHER players — each client keeps its own in IndexedDB. To
+// let the other seats actually SEE your avatar (the Sprint 7 requirement), the
+// server holds an in-memory blob store keyed by avatarId. On upload the client
+// POSTs the raw bytes here; other clients then fetch the same bytes from
+// GET /avatars/:id. This is per-process (resets on restart) and best-effort:
+// a missing blob just falls back to the neutral default seat avatar.
+const avatarBlobs = new Map(); // avatarId -> { blob, mime }
+const MAX_AVATAR_UPLOAD = 20 * 1024 * 1024; // 20 MB, matches the client cap
+
+app.post('/avatars/:id', express.raw({ type: () => true, limit: MAX_AVATAR_UPLOAD }), (req, res) => {
+  const id = String(req.params.id || '');
+  if (!/^[A-Za-z0-9._-]{1,80}$/.test(id)) {
+    res.status(400).json({ ok: false, error: 'bad avatar id' });
+    return;
+  }
+  const body = req.body; // Buffer (express.raw)
+  if (!body || typeof body.length !== 'number' || body.length === 0) {
+    res.status(400).json({ ok: false, error: 'empty body' });
+    return;
+  }
+  if (body.length > MAX_AVATAR_UPLOAD) {
+    res.status(413).json({ ok: false, error: 'too large' });
+    return;
+  }
+  const mime = String(req.get('content-type') || '').split(';')[0].trim() || 'application/octet-stream';
+  avatarBlobs.set(id, { blob: body, mime });
+  res.json({ ok: true });
+});
+
+app.get('/avatars/:id', (req, res) => {
+  const id = String(req.params.id || '');
+  const rec = avatarBlobs.get(id);
+  if (!rec) {
+    res.status(404).json({ ok: false, error: 'not found' });
+    return;
+  }
+  res.set('Content-Type', rec.mime);
+  res.set('Content-Length', String(rec.blob.length));
+  res.set('Cache-Control', 'private, max-age=3600');
+  res.end(rec.blob);
+});
+
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*', methods: ['GET', 'POST'] } });
 
@@ -528,6 +572,57 @@ io.on('connection', (socket) => {
       text: String(text).slice(0, 400),
       ts: Date.now()
     });
+  });
+
+  /**
+   * Sprint 7 — emote RELAY. Previously emotes were local-only (only the sender
+   * saw the bubble). Now the sender emits `emote { playerId, code }` and the
+   * server re-broadcasts it to the whole table room, so every other seat renders
+   * the bubble above the sender's stick figure. The code is validated against
+   * the shared palette on the client; the server just relays the small payload.
+   * Emotes require no game state — they work for players (and are safe even if
+   * `binding` is missing, in which case we simply drop them).
+   */
+  socket.on('emote', ({ playerId, code }, ack) => {
+    if (!binding) {
+      if (typeof ack === 'function') ack({ ok: false, error: 'join a table first' });
+      return;
+    }
+    const entry = store.get(binding.tableId);
+    const targetId = String(playerId || binding.playerId);
+    // Only allow emotes for a player actually seated at this table.
+    if (!entry || !entry.table.players.some((p) => p.id === targetId)) {
+      if (typeof ack === 'function') ack({ ok: false, error: 'unknown player' });
+      return;
+    }
+    const safeCode = typeof code === 'string' ? code.slice(0, 32) : '';
+    io.to(tableRoom(binding.tableId)).emit('emote', { playerId: targetId, code: safeCode, ts: Date.now() });
+    if (typeof ack === 'function') ack({ ok: true, playerId: targetId, code: safeCode });
+  });
+
+  /**
+   * Sprint 7 — live avatar update. `avatarMeta` is set only ONCE, at
+   * `joinTable`. When the player picks a NEW avatar (or clears it) afterwards,
+   * the blob is POSTed to `/avatars/:id`, but the server never learns the new
+   * id — so every OTHER seat keeps resolving the stale/missing id and renders
+   * the default stick figure. This handler attaches the current (sanitized)
+   * avatarMeta to the caller's own player and re-broadcasts the snapshot so
+   * the other seats re-fetch the shared blob and show the new avatar
+   * immediately — no re-join required.
+   */
+  socket.on('updateAvatar', ({ avatarMeta }, ack) => {
+    try {
+      if (!binding) throw new Error('join a table first');
+      const entry = store.get(binding.tableId);
+      if (!entry) throw new Error('table not found');
+      const me = entry.table.players.find((p) => p.id === binding.playerId);
+      if (!me) throw new Error('no seat at this table');
+      me.avatarMeta = sanitizeAvatarMeta(avatarMeta); // null when clearing
+      broadcast(binding.tableId);
+      if (typeof ack === 'function') ack({ ok: true, avatarMeta: me.avatarMeta });
+    } catch (err) {
+      if (typeof ack === 'function') ack({ ok: false, error: err.message });
+    }
   });
 
   socket.on('leaveTable', (ack) => {

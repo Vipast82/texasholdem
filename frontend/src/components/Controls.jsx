@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { minRaise, maxBet } from '@saloon/shared/bettingRules';
+import { DIFFICULTIES } from '@saloon/shared';
 import { useGameStore } from '../store.js';
 import { t } from '../i18n.js';
 
@@ -8,7 +9,10 @@ export default function Controls({ snapshot }) {
   const botActions = useGameStore((s) => s.botActions);
   const playerAction = useGameStore((s) => s.playerAction);
   const startHand = useGameStore((s) => s.startHand);
+  const addBot = useGameStore((s) => s.addBot);
   const [customAmount, setCustomAmount] = useState('');
+  const [cpuDifficulty, setCpuDifficulty] = useState('normal');
+  const [adding, setAdding] = useState(false);
 
   const me = snapshot.players.find((p) => p.id === playerId);
   const myTurn = snapshot.inHand && snapshot.nextActorId === playerId && me && !me.hasFolded && !me.isAllIn;
@@ -121,11 +125,47 @@ export default function Controls({ snapshot }) {
     );
   }
 
+  const seatCount = snapshot.players.length;
+  const seatsFull = seatCount >= 10;
+
+  const onAddCpu = async () => {
+    setAdding(true);
+    await addBot(cpuDifficulty); // keep the chosen difficulty so several bots can be added in a row
+    setAdding(false);
+  };
+
   return (
     <div className="controls controls--idle">
-      <button className="btn btn--primary" onClick={() => startHand()}>
-        {t('controls.startHand')}
-      </button>
+      <div className="controls__row controls__idle-row">
+        <button className="btn btn--primary" onClick={() => startHand()}>
+          {t('controls.startHand')}
+        </button>
+        <span className="controls__idle-sep" aria-hidden="true" />
+        <label className="controls__cpu" title={t('controls.addCpuHint')}>
+          <span className="controls__cpu-label">{t('controls.addCpu')}</span>
+          <select
+            className="controls__cpu-select"
+            value={cpuDifficulty}
+            disabled={seatsFull || adding}
+            onChange={(e) => setCpuDifficulty(e.target.value)}
+          >
+            {DIFFICULTIES.map((d) => (
+              <option key={d} value={d}>
+                {t(`difficulty.${d}`)}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className="btn btn--ghost"
+            onClick={onAddCpu}
+            disabled={seatsFull || adding}
+          >
+            {adding ? t('controls.addingCpu') : `+ ${t('controls.cpu')}`}
+          </button>
+        </label>
+      </div>
+      {seatsFull && <p className="controls__hint">{t('controls.tableFull')}</p>}
     </div>
   );
 }

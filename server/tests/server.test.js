@@ -251,3 +251,97 @@ describe('server spectator + history (Sprint 4)', () => {
     b.socket.close();
   });
 });
+
+// -----------------------------------------------------------------------------
+// Sprint 7: live avatar sharing — changing the avatar after joining must
+// propagate to the OTHER seats (no re-join), via the `updateAvatar` event.
+// -----------------------------------------------------------------------------
+describe('server avatar sharing (Sprint 7)', () => {
+  let server;
+  let ioUrl;
+
+  beforeAll(async () => {
+    process.env.NODE_ENV = 'test';
+    const started = await startServer();
+    server = started.server;
+    ioUrl = started.url;
+  });
+
+  afterAll(async () => {
+    server.close();
+  });
+
+  const join = (url, tableId, name) =>
+    new Promise((resolve, reject) => {
+      const socket = Client(url, { transports: ['websocket'] });
+      socket.on('connect', () =>
+        socket.emit('joinTable', { tableId, name }, (res) => {
+          if (res.ok) resolve({ socket, playerId: res.playerId });
+          else reject(new Error(res.error));
+        })
+      );
+      socket.on('connect_error', reject);
+    });
+
+  const ack = (socket, event, payload = {}) =>
+    new Promise((resolve) => socket.emit(event, payload, resolve));
+
+  it('updating the avatar after joining updates the OTHER seat snapshot; clearing resets it', async () => {
+    const tableId = `av-${Date.now()}`;
+    const alice = await join(ioUrl, tableId, 'Alice');
+    const bob = await join(ioUrl, tableId, 'Bob');
+
+    // Each client captures the latest server push (state is per-viewer; the
+    // avatarMeta of the OPPOSITE seat is shared by every viewer).
+    let aliceView = null;
+    let bobView = null;
+    alice.socket.on('state', (s) => (aliceView = s));
+    bob.socket.on('state', (s) => (bobView = s));
+
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+    // Baseline: nobody joined with an avatar, so both seats are null.
+    await wait(50);
+    const aliceBaseline = aliceView.players.find((p) => p.id === alice.playerId);
+    expect(aliceBaseline.avatarMeta || null).toBeNull();
+
+    // Alice picks a NEW avatar after joining. The blob lives in /avatars/:id
+    // (already POSTed in the app); here we exercise the metadata hand-off.
+    const newId = `user-avtest-${Date.now()}`;
+    const up = await ack(alice.socket, 'updateAvatar', {
+      avatarMeta: { avatarId: newId, kind: 'upload', crop: { x: 0, y: 0, size: 40 } }
+    });
+    expect(up.ok).toBe(true);
+
+    // Give the broadcast a beat to reach both viewers.
+    await wait(50);
+
+    // BOB (the other seat) must now see Alice's new avatarMeta on her player.
+    const aliceInBob = bobView.players.find((p) => p.id === alice.playerId);
+    expect(aliceInBob.avatarMeta).toBeTruthy();
+    expect(aliceInBob.avatarMeta.avatarId).toBe(newId);
+    expect(aliceInBob.avatarMeta.kind).toBe('upload');
+
+    // And Alice's own view is consistent with what the server stored.
+    const aliceInAlice = aliceView.players.find((p) => p.id === alice.playerId);
+    expect(aliceInAlice.avatarMeta.avatarId).toBe(newId);
+
+    // Reset (clear) must propagate to the other seat too.
+    const clr = await ack(alice.socket, 'updateAvatar', { avatarMeta: null });
+    expect(clr.ok).toBe(true);
+    await wait(50);
+    const clearedInBob = bobView.players.find((p) => p.id === alice.playerId);
+    expect(clearedInBob.avatarMeta || null).toBeNull();
+
+    alice.socket.close();
+    bob.socket.close();
+  });
+
+  it('a non-seated socket cannot update an avatar', async () => {
+    const stray = Client(ioUrl, { transports: ['websocket'] });
+    await new Promise((r) => stray.on('connect', r));
+    const res = await ack(stray, 'updateAvatar', { avatarMeta: { avatarId: 'x' } });
+    expect(res.ok).toBe(false);
+    stray.close();
+  });
+});

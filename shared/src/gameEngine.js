@@ -105,7 +105,49 @@ export class GameTable {
     if (i < 0) return false;
     const [p] = this.players.splice(i, 1);
     this.seatToPlayer.delete(p.seat);
+    // If removing this player strands the table mid-hand (fewer than two
+    // active players), end the hand immediately: the pot is refunded to the
+    // sole remaining player (chips preserved) so the table returns to the
+    // idle state and no "Waiting for the next player…" limbo is left behind.
+    // See resolveOrphanedHand().
+    this.resolveOrphanedHand();
     return true;
+  }
+
+  /**
+   * When a mid-hand departure leaves the table with fewer than two active
+   * players, end the hand and refund the pot to the sole remaining player so
+   * the table returns to a clean idle state.
+   *
+   * The pot is returned to the "still-in" players (not folded — folded players
+   * already gave up their claim) proportional to what each of them committed
+   * to the pot on this hand, so chips are never destroyed. After the refund,
+   * everyone is back to 'seated' and `inHand` is false, so the table is
+   * cleanly idle: a remaining player can click "Start Hand" or add a CPU.
+   *
+   * Safe to call unconditionally; it is a no-op when not inHand or when the
+   * table still has 2+ active players.
+   */
+  resolveOrphanedHand() {
+    if (!this.inHand) return;
+    const stillIn = this.players.filter(
+      (p) => p.status === 'in-hand' && !p.hasFolded
+    );
+    if (stillIn.length >= 2) return; // hand can continue with 2+ players
+    const pot = this.pot;
+    const payouts = {};
+    if (pot > 0 && stillIn.length === 1) {
+      // Sole remaining player: refund the ENTIRE pot (chips preserved).
+      // Fairness: the departing player(s) lost their blinds/bets, but the
+      // remaining player did NOT "win" against them — the table just emptied.
+      // Refunding the full pot to them avoids destroying chips.
+      const p = stillIn[0];
+      payouts[p.id] = pot;
+      p.chips += pot;
+    }
+    this.payouts = payouts;
+    this.lastShowdown = null;
+    this.finishHand({ winnerId: null, reason: 'table-orphaned' });
   }
 
   playerById(id) {

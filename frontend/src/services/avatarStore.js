@@ -14,9 +14,22 @@
 import * as idb from './idb.js';
 import { getProfile } from '@saloon/shared/ai/aiProfiles';
 
-/** GIF only, hard cap 20 MB (per spec). */
+/**
+ * Avatars accept any common browser image type (GIF, PNG, JPEG, WebP, AVIF,
+ * BMP, SVG). Hard cap 20 MB (per spec). Animated formats (GIF/WebP) are
+ * rendered as the first frame via CSS `background-image` — the browser
+ * handles the animation natively when the source is a data URL / <img>.
+ */
 export const MAX_AVATAR_BYTES = 20 * 1024 * 1024;
-export const ACCEPTED_TYPES = ['image/gif'];
+export const ACCEPTED_TYPES = [
+  'image/gif',
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/avif',
+  'image/bmp',
+  'image/svg+xml'
+];
 
 /**
  * Validate an uploaded avatar file (pure).

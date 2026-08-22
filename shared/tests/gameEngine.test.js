@@ -150,3 +150,82 @@ describe('GameTable - game types', () => {
     expect(game.currentBet).toBe(100);
   });
 });
+
+describe('GameTable - mid-hand removal (orphaned hand)', () => {
+  function twoPlayerTable() {
+    const game = new GameTable({
+      tableId: 't',
+      smallBlind: 10,
+      bigBlind: 20,
+      startingStack: 2000
+    });
+    game.addPlayer({ id: 'a', name: 'A', seat: 0 });
+    game.addPlayer({ id: 'b', name: 'B', seat: 1 });
+    return game;
+  }
+
+  it('resolves the hand when a 2-player table drops to 1 active player', () => {
+    const game = twoPlayerTable();
+    game.startHand();
+    expect(game.inHand).toBe(true);
+    // After blinds: a=1990 (SB, contributed 10), b=1980 (BB, contributed 20), pot=30.
+    expect(game.players.find((p) => p.id === 'a').chips).toBe(1990);
+    expect(game.players.find((p) => p.id === 'b').chips).toBe(1980);
+    expect(game.pot).toBe(30);
+    // Remove one player mid-hand. Only one active remains -> hand must end.
+    game.removePlayer('a');
+    expect(game.inHand).toBe(false);
+    expect(game.street).toBe('ended');
+    expect(game.pot).toBe(0);
+    // Sole remaining player gets the ENTIRE pot refunded (chips preserved).
+    const b = game.playerById('b');
+    expect(b.chips).toBe(1980 + 30); // full stack + pot back
+  });
+
+  it('resolves a hand mid-flop when one of two players leaves', () => {
+    const game = twoPlayerTable();
+    game.startHand();
+    // 2-player preflop: SB (a) acts first. SB calls the BB.
+    const first = game.nextActorId();
+    game.applyAction(first, 'call', 20);
+    // Now BB (b) acts. BB checks (toCall is 0).
+    const second = game.nextActorId();
+    expect(second).not.toBeNull();
+    game.applyAction(second, 'check');
+    // Both have acted on preflop -> street advances to flop.
+    expect(game.inHand).toBe(true);
+    expect(game.street).toBe('flop');
+    // Contributions at this point: a = 10 (SB) + 10 (call) = 20, b = 20 (BB).
+    // Pot = 40. Remove a player mid-flop.
+    game.removePlayer('a');
+    expect(game.inHand).toBe(false);
+    expect(game.street).toBe('ended');
+    expect(game.pot).toBe(0);
+    // b is the only remaining player. Sole-survivor rule: gets the full pot back.
+    const b = game.playerById('b');
+    expect(b.chips).toBe(1980 + 40); // full stack returned (pot = 40 at flop)
+  });
+
+  it('does NOT resolve when a 3-player table still has 2 active after removal', () => {
+    const game = makeTable();
+    game.startHand();
+    expect(game.inHand).toBe(true);
+    // 3 players in-hand; remove one -> 2 still in-hand. Hand should continue.
+    game.removePlayer('p1');
+    expect(game.inHand).toBe(true);
+    expect(game.street).toBe('preflop');
+    // The remaining two can still act normally.
+    const actor = game.nextActorId();
+    expect(actor).not.toBeNull();
+  });
+
+  it('does NOT trigger orphan resolution during idle (no hand in progress)', () => {
+    const game = makeTable();
+    // No hand started yet; removing a player should just remove them.
+    game.removePlayer('p1');
+    expect(game.inHand).toBe(false);
+    expect(game.street).not.toBe('ended');
+    // 2 players remain.
+    expect(game.players).toHaveLength(2);
+  });
+});

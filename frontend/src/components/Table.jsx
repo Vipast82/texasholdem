@@ -7,6 +7,7 @@ import DealerButton from './DealerButton.jsx';
 import StickFigure from './StickFigure.jsx';
 import EmoteBar from './EmoteBar.jsx';
 import ChipStack from './ChipStack.jsx';
+import BetChips from './BetChips.jsx';
 
 /**
  * Sprint 5 art pass — "is this card newly appearing?" helper.
@@ -46,15 +47,33 @@ function streetLabel(street) {
   return out === key ? street : out;
 }
 
-function CommunityCard({ card, faceUp }) {
+/**
+ * Runout (all-in / everyone matched) is a single server snapshot: the turn AND
+ * river hit the board at once and the hand ends. Instead of showing both
+ * instantly (and then the screen clearing), we reveal them on a slow,
+ * cinematic beat. Delays are keyed by the community-card index (0-based) so the
+ * flop (0-2) lands first, then the turn (~1.3 s), then the river (~2.4 s) —
+ * giving a clear "flop … turn … river" cadence even though the server dealt
+ * them in one move.
+ */
+const SLOW_REVEAL_DELAYS = [0, 0, 0, 1.3, 2.4];
+/** Total time (ms) before the winner celebration plays on a slow runout
+ *  (river lands at ~2.4s + its ~1s flip, so celebrate just after it settles). */
+const RUNOUT_CELEBRATE_MS = 3200;
+
+function CommunityCard({ card, faceUp, slowReveal, index }) {
   if (!faceUp) {
     // Card back — deal-in (flies in from the deck) when a new card appears.
     return <div className="card card--back card--deal" />;
   }
   const { rank, suit, isRed } = parseDisplayCard(card);
   // Face-up — 3D flip-in when the street reveals.
+  // `slowReveal` gives the runout (all-in → turn + river) a cinematic stagger:
+  // turn appears ~1.3 s after the flop, river ~2.5 s, so the player can watch
+  // each card land before the showdown is decided.
+  const cls = slowReveal ? 'card--flip card--slow-reveal' : 'card--flip';
   return (
-    <div className={`card ${isRed ? 'card--red' : 'card--black'} card--flip`}>
+    <div className={`card ${isRed ? 'card--red' : 'card--black'} ${cls}`} style={slowReveal ? { animationDelay: `${SLOW_REVEAL_DELAYS[index] || 0}s` } : undefined}>
       <span className="card__rank">{rank}</span>
       <span className="card__suit">{suit}</span>
     </div>
@@ -103,7 +122,7 @@ function poseFor(player, isNextActor, isWinner) {
   return 'idle';
 }
 
-function PlayerBadge({ player, street, isYou, isDealer, isNextActor, isWinner, botAction, snapshot, emote }) {
+function PlayerBadge({ player, street, isYou, isDealer, isNextActor, isWinner, botAction, snapshot, emote, canRemoveBot, onRemoveBot }) {
   const pose = poseFor(player, isNextActor, isWinner);
 
   return (
@@ -125,6 +144,14 @@ function PlayerBadge({ player, street, isYou, isDealer, isNextActor, isWinner, b
         {isDealer && <DealerButton active seat={player.name} />}
       </div>
 
+      {/* Sprint 7 — bet chips: the amount posted THIS street as a growing,
+          color-coded chip pile so the bet size is visible at a glance. */}
+      {(player.contributions && (player.contributions[street] || 0) > 0) && !player.hasFolded && (
+        <div className="seat__betchips">
+          <BetChips amount={player.contributions[street]} denominations={snapshot.chipDenominations || [1, 5, 25, 100, 500]} />
+        </div>
+      )}
+
       <span className="seat__name">
         {player.name}
         {isYou && t('seat.you')}
@@ -137,6 +164,17 @@ function PlayerBadge({ player, street, isYou, isDealer, isNextActor, isWinner, b
           </span>
         )}
       </span>
+      {player.isBot && canRemoveBot && (
+        <button
+          type="button"
+          className="seat__removebot"
+          aria-label={t('seat.removeBot', { name: player.name })}
+          title={t('seat.removeBot', { name: player.name })}
+          onClick={() => onRemoveBot(player.id)}
+        >
+          ✕
+        </button>
+      )}
 
       <HoleCards cards={player.holeCards} />
       <HudOdds snapshot={snapshot} playerId={player.id} />
@@ -167,19 +205,74 @@ export default function Table({ snapshot }) {
   const toggleHud = useGameStore((s) => s.toggleHud);
   const spectator = useGameStore((s) => s.spectator);
   const emotes = useGameStore((s) => s.emotes);
+  const removeBot = useGameStore((s) => s.removeBot);
   const sortedPlayers = [...snapshot.players].sort((a, b) => a.seat - b.seat);
   const community = snapshot.community || [];
-  const faceUp = ['flop', 'turn', 'river'].includes(snapshot.street);
   const communitySlots = 5;
+  const handNum = snapshot.handNumber || 0;
 
-  // Sprint 6 — resolve this hand's winner ids (for the winning pose).
+  // ---------------------------------------------------------------------------
+  // Showdown pacing (all-in / runout + "hold after river")
+  //
+  // Two things were jarring with the raw snapshots:
+  //   1. An all-in runout deals the turn AND river in ONE 'ended' snapshot, so
+  //      the board flashed all at once.
+  //   2. On 'ended' the old code set faceUp=false, so the final board flipped
+  //      to backs and the screen "cleared" the instant the hand resolved.
+  //
+  // We fix both purely here (engine/server untouched):
+  //   * keep the final board face-up and HOLD it until the dealer starts the
+  //     next hand (faceUp is true for a live street OR an ended hand with cards);
+  //   * for a runout, reveal the 5 cards on a slow beat and only fire the
+  //     winner celebration AFTER the river lands.
+  // ---------------------------------------------------------------------------
+  const isEndedNow =
+    !snapshot.inHand && (snapshot.street === 'ended' || snapshot.street === 'idle');
+  const liveBoard = ['flop', 'turn', 'river'].includes(snapshot.street);
+  const faceUp = liveBoard || (isEndedNow && community.length > 0);
+
+  // Track, per hand, whether we ever SAW a live 'river' street. A hand that
+  // jumps straight to an ended 5-card board without one is an all-in runout.
+  // (Reading + latching a ref in render is safe here: every mutation is
+  // idempotent, so React's double-invoke / re-render cannot desync it.)
+  const paceRef = useRef({ hand: -1, sawRiver: false, runout: false });
+  const pace = paceRef.current;
+  if (handNum !== pace.hand) {
+    pace.hand = handNum;
+    pace.sawRiver = false;
+    pace.runout = false;
+  }
+  if (liveBoard && snapshot.street === 'river') pace.sawRiver = true;
+  if (isEndedNow && community.length === 5 && !pace.sawRiver) pace.runout = true;
+  const isRunoutHand = pace.runout;
+
+  // Winner celebration: instant for a normal hand; on a runout, wait for the
+  // slow river reveal before the winner pops / the glow plays. `celebrateDelayed`
+  // starts false so the FIRST runout render does not flash the winner early.
+  const [celebrateDelayed, setCelebrateDelayed] = useState(false);
+  useEffect(() => {
+    if (!isRunoutHand) {
+      setCelebrateDelayed(true);
+      return undefined;
+    }
+    setCelebrateDelayed(false);
+    const t = setTimeout(() => setCelebrateDelayed(true), RUNOUT_CELEBRATE_MS);
+    return () => clearTimeout(t);
+  }, [isRunoutHand, handNum]);
+  const winnerVisible = isRunoutHand ? celebrateDelayed : true;
+
+  // Sprint 6 — resolve this hand's winner ids (for the winning pose), gated by
+  // the celebration timing so a runout winner pops only after the river lands.
   const lastWinners = (snapshot.lastShowdown && snapshot.lastShowdown.winnerIds) || [];
-  const isWinner = (p) => lastWinners.includes(p.id);
+  const isWinner = (p) => winnerVisible && lastWinners.includes(p.id);
+
+  // The runout's slow, per-card reveal (flop → turn → river) with staggered
+  // delays (SLOW_REVEAL_DELAYS). Only active for an ended 5-card board.
+  const slowReveal = isRunoutHand && isEndedNow && community.length === 5;
 
   // Sprint 5 art pass: the table wiggles once and the pot glows when a new
   // hand starts (handNumber changes). useTransientFlag is inert on first
   // mount, so joining an in-progress table does NOT fake a shuffle.
-  const handNum = snapshot.handNumber || 0;
   const shuffling = useTransientFlag(handNum, 700);
   const potGlow = useTransientFlag(`${handNum}-pot`, 1300);
 
@@ -208,6 +301,8 @@ export default function Table({ snapshot }) {
                 key={community[i] ? `${community[i]}-${snapshot.street}` : `empty-${i}`}
                 card={community[i]}
                 faceUp={faceUp && i < community.length}
+                slowReveal={slowReveal}
+                index={i}
               />
             ))}
           </div>
@@ -227,6 +322,8 @@ export default function Table({ snapshot }) {
               botAction={botActions[p.id] || null}
               snapshot={snapshot}
               emote={emotes[p.id] ? emotes[p.id].glyph : null}
+              canRemoveBot={!snapshot.inHand && !spectator.active}
+              onRemoveBot={(botId) => { removeBot(botId); }}
             />
           ))}
         </div>
