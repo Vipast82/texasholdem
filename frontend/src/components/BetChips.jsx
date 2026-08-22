@@ -73,7 +73,7 @@ export default function BetChips({ amount = 0, denominations = [1, 5, 25, 100, 5
               className="betchips__disc"
               role="img"
               aria-label={t('a11y.chipCount', { count: 1, value: d.value })}
-              style={{ backgroundColor: d.color, width: discSize, height: discSize, zIndex: i }}
+              style={{ backgroundColor: d.color, width: discSize, zIndex: i }}
             />
           );
         })}

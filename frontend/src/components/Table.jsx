@@ -111,6 +111,58 @@ function statusLabel(player, street) {
 }
 
 /**
+ * layoutSeats — compute a position (in stage %) for every seat so players are
+ * arranged AROUND the oval rim, the way a real poker table reads:
+ *   - "you" anchors to bottom-centre (in front of the table);
+ *   - opponents spread evenly across the upper arc (upper-left → top → upper-right).
+ *
+ * Pure + deterministic (no randomness), so React's double-render can't desync.
+ * Returns an array parallel to `players` (same order/length) of `{ x, y }`.
+ */
+function layoutSeats(players, playerId) {
+  const RX = 34; // horizontal radius (% of the stage)
+  const RY = 33; // vertical radius
+  const toRad = (d) => (d * Math.PI) / 180;
+  const meIndex = players.findIndex((p) => p.id === playerId);
+  const opponents = players.map((p, i) => i).filter((i) => i !== meIndex);
+  const n = opponents.length;
+  const positions = new Array(players.length).fill(null);
+  opponents.forEach((playerIdx, idx) => {
+    let a;
+    if (n === 1) a = 90; // top-centre
+    else {
+      // spread across the upper arc, 15°..165°, so the two edge seats sit at
+      // the upper sides (not dead-on the horizontal extremes).
+      a = 15 + (150 * idx) / (n - 1);
+    }
+    const x = 50 + RX * Math.cos(toRad(a));
+    const y = 50 - RY * Math.sin(toRad(a));
+    positions[playerIdx] = { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 };
+  });
+  if (meIndex >= 0) positions[meIndex] = { x: 50, y: 86 };
+  return positions;
+}
+
+/**
+ * PotStack — the centre pot rendered as a 3D "tower" of chips on the felt, so
+ * the pot reads as a physical stack (taller for bigger pots) instead of just a
+ * number. Decorative (the value is already announced in the table topline), so
+ * it is aria-hidden. Renders nothing for an empty pot.
+ */
+function PotStack({ pot }) {
+  if (!pot || pot <= 0) return null;
+  // ~3 chips for tiny pots, up to 9 for big ones (log scale keeps it tidy).
+  const n = Math.max(3, Math.min(9, Math.round(3 + Math.log10(pot + 1) * 1.1)));
+  return (
+    <div className="potstack" aria-hidden="true">
+      {Array.from({ length: n }).map((_, i) => (
+        <span key={i} className="potstack__chip" style={{ zIndex: n - i }} />
+      ))}
+    </div>
+  );
+}
+
+/**
  * Sprint 6 — derive a stick-figure pose from the player's live state.
  *   winning > allin > folded > acting > idle
  */
@@ -122,7 +174,7 @@ function poseFor(player, isNextActor, isWinner) {
   return 'idle';
 }
 
-function PlayerBadge({ player, street, isYou, isDealer, isNextActor, isWinner, botAction, snapshot, emote, canRemoveBot, onRemoveBot }) {
+function PlayerBadge({ player, street, isYou, isDealer, isNextActor, isWinner, botAction, snapshot, emote, canRemoveBot, onRemoveBot, pos }) {
   const pose = poseFor(player, isNextActor, isWinner);
 
   return (
@@ -138,6 +190,9 @@ function PlayerBadge({ player, street, isYou, isDealer, isNextActor, isWinner, b
       ]
         .filter(Boolean)
         .join(' ')}
+      // Rim placement (see layoutSeats): anchor the seat card on its (x%, y%)
+      // point around the oval. CSS `.seat` handles the translate(-50%,-50%).
+      style={pos ? { left: `${pos.x}%`, top: `${pos.y}%` } : undefined}
     >
       <div className="seat__figure">
         <StickFigure player={player} pose={pose} emote={emote} isMe={isYou} />
@@ -278,6 +333,9 @@ export default function Table({ snapshot }) {
 
   const tableClass = ['table', 'table--saloon', shuffling && 'table--shuffling'].filter(Boolean).join(' ');
 
+  // Seat positions around the oval rim (pure; see layoutSeats).
+  const seatPositions = layoutSeats(sortedPlayers, playerId);
+
   return (
     <div className={tableClass}>
       <div className="table__topline">
@@ -293,39 +351,47 @@ export default function Table({ snapshot }) {
       </div>
 
       <div className="table__saloonbody">
-        {/* Center of the oval: felt + community cards */}
-        <div className="table__felt">
-          <div className="table__community">
-            {Array.from({ length: communitySlots }).map((_, i) => (
-              <CommunityCard
-                key={community[i] ? `${community[i]}-${snapshot.street}` : `empty-${i}`}
-                card={community[i]}
-                faceUp={faceUp && i < community.length}
-                slowReveal={slowReveal}
-                index={i}
+        {/* The 3D stage: a tilted oval felt with the pot + cards in the centre
+            and the players seated around its rim. */}
+        <div className="table__stage">
+          {/* Center of the oval: 3D-raised felt + pot tower + community cards */}
+          <div className="table__felt">
+            <div className="table__community">
+              <PotStack pot={snapshot.pot} />
+              <div className="table__cardsrow">
+                {Array.from({ length: communitySlots }).map((_, i) => (
+                  <CommunityCard
+                    key={community[i] ? `${community[i]}-${snapshot.street}` : `empty-${i}`}
+                    card={community[i]}
+                    faceUp={faceUp && i < community.length}
+                    slowReveal={slowReveal}
+                    index={i}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Players arranged around the oval table */}
+          <div className="table__players">
+            {sortedPlayers.map((p, i) => (
+              <PlayerBadge
+                key={p.id}
+                player={p}
+                street={snapshot.street}
+                isYou={p.id === playerId}
+                isDealer={snapshot.dealerSeat === p.seat}
+                isNextActor={snapshot.nextActorId === p.id}
+                isWinner={isWinner(p)}
+                botAction={botActions[p.id] || null}
+                snapshot={snapshot}
+                emote={emotes[p.id] ? emotes[p.id].glyph : null}
+                canRemoveBot={!snapshot.inHand && !spectator.active}
+                onRemoveBot={(botId) => { removeBot(botId); }}
+                pos={seatPositions[i] || null}
               />
             ))}
           </div>
-        </div>
-
-        {/* Players arranged around the oval table */}
-        <div className="table__players">
-          {sortedPlayers.map((p) => (
-            <PlayerBadge
-              key={p.id}
-              player={p}
-              street={snapshot.street}
-              isYou={p.id === playerId}
-              isDealer={snapshot.dealerSeat === p.seat}
-              isNextActor={snapshot.nextActorId === p.id}
-              isWinner={isWinner(p)}
-              botAction={botActions[p.id] || null}
-              snapshot={snapshot}
-              emote={emotes[p.id] ? emotes[p.id].glyph : null}
-              canRemoveBot={!snapshot.inHand && !spectator.active}
-              onRemoveBot={(botId) => { removeBot(botId); }}
-            />
-          ))}
         </div>
       </div>
 

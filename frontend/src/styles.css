@@ -181,15 +181,47 @@ h2 {
   color: var(--gold);
 }
 
+/* Casino-style action buttons: a bronze/gold bevel with a bottom "lip" so they
+   read as physical FOLD / CALL / BET buttons (like a real table's action bar).
+   `.btn--action` is also used by the spectator step-through control — the same
+   treatment works for both. */
 .btn--action {
-  background: var(--felt-dark);
+  background: linear-gradient(180deg, #8a5a2b 0%, #5a3a24 100%);
   border: 1px solid var(--gold);
+  color: var(--cream);
+  padding: 12px 22px;
+  font-size: 16px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  border-radius: 10px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 230, 170, 0.4),
+    inset 0 -3px 0 rgba(0, 0, 0, 0.45),
+    0 4px 8px rgba(0, 0, 0, 0.4);
+}
+
+.btn--action:hover {
+  filter: brightness(1.14);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 230, 170, 0.5),
+    inset 0 -3px 0 rgba(0, 0, 0, 0.45),
+    0 6px 12px rgba(0, 0, 0, 0.45);
 }
 
 .btn--fold {
-  background: var(--danger);
+  background: linear-gradient(180deg, #c9503f 0%, #8a2e22 100%);
+  border: 1px solid #e0796a;
   color: #fff;
   width: 100%;
+  padding: 13px 22px;
+  font-size: 16px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  border-radius: 10px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    inset 0 -3px 0 rgba(0, 0, 0, 0.45),
+    0 4px 8px rgba(0, 0, 0, 0.4);
 }
 
 .main {
@@ -214,14 +246,15 @@ h2 {
 }
 
 /* ---------------------------------------------------------------------
-   Sprint 6 — Western saloon table
-   Warm wood background with plank texture + lantern glow, oval felt center,
-   players arranged around the felt as stick figures.
+   Sprint 8 — 3D Western saloon table
+   Perspective-tilted wooden table with a thick 3D oval rail.
+   Players positioned AROUND the felt rim (bottom = you, top arc = opponents).
+   Chips render as 3D cylindrical stacks.
 --------------------------------------------------------------------- */
 .table--saloon {
   background:
     /* lantern glow */
-    radial-gradient(ellipse at 50% 18%, rgba(255, 214, 130, 0.28) 0%, rgba(255, 214, 130, 0) 42%),
+    radial-gradient(ellipse at 50% 12%, rgba(255, 214, 130, 0.32) 0%, rgba(255, 214, 130, 0) 38%),
     /* wood grain */
     repeating-linear-gradient(
       92deg,
@@ -231,16 +264,21 @@ h2 {
       #52331c 78px
     ),
     #422915;
-  border: 10px solid #2a1a0c;
-  border-radius: 22px;
+  border: 14px solid #2a1a0c;
+  border-radius: 26px;
   box-shadow:
-    inset 0 0 60px rgba(0, 0, 0, 0.55),
-    inset 0 2px 0 rgba(255, 220, 150, 0.18),
-    0 12px 32px var(--shadow);
-  padding: 26px 22px;
+    inset 0 0 70px rgba(0, 0, 0, 0.6),
+    inset 0 3px 0 rgba(255, 220, 150, 0.2),
+    inset 0 -6px 0 rgba(0, 0, 0, 0.4),
+    0 16px 40px rgba(0, 0, 0, 0.6),
+    0 4px 8px rgba(0, 0, 0, 0.4);
+  padding: 18px 14px 12px;
+  position: relative;
+  perspective: 900px;
+  overflow: visible;
 }
 
-/* Faux hanging lantern + swinging rope via pseudo-element (no external image). */
+/* Faux plank seams + vignette overlay */
 .table--saloon::before {
   content: '';
   position: absolute;
@@ -248,21 +286,16 @@ h2 {
   border-radius: inherit;
   pointer-events: none;
   background:
-    /* plank seams */
     repeating-linear-gradient(
       0deg,
-      rgba(0, 0, 0, 0.22) 0px,
-      rgba(0, 0, 0, 0.22) 2px,
+      rgba(0, 0, 0, 0.2) 0px,
+      rgba(0, 0, 0, 0.2) 2px,
       transparent 2px,
       transparent 90px
     ),
-    /* subtle vignette */
-    radial-gradient(ellipse at 50% 50%, transparent 55%, rgba(0, 0, 0, 0.4) 100%);
-  opacity: 0.6;
-}
-
-.table--saloon {
-  position: relative;
+    radial-gradient(ellipse at 50% 50%, transparent 55%, rgba(0, 0, 0, 0.45) 100%);
+  opacity: 0.55;
+  z-index: 0;
 }
 
 .table__topline {
@@ -287,47 +320,86 @@ h2 {
   font-weight: bold;
 }
 
-/* Oval felt in the centre of the saloon table. */
+/* ---------------------------------------------------------------------
+   3D table stage: the felt is a tilted oval viewed at an angle; seats are
+   absolutely positioned AROUND its rim. `table__stage` is the coordinate
+   space for seat placement (set inline in Table.jsx as aspect-ratio box).
+--------------------------------------------------------------------- */
 .table__saloonbody {
   position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 16px;
+  width: 100%;
+  display: flex;
+  justify-content: center;
 }
 
+/* The coordinate box that seats are placed around. Fixed aspect so the
+   rim math in Table.jsx (percentages) is stable across viewports. */
+.table__stage {
+  position: relative;
+  width: min(760px, 100%);
+  aspect-ratio: 10 / 8;
+  margin: 0 auto;
+}
+
+/* The oval felt: a 3D-raised green felt sitting in the stage, tilted so the
+   near (bottom) edge is larger / closer and the far edge recedes — the
+   "looking down at a table" effect. */
 .table__felt {
-  justify-self: center;
-  width: min(560px, 100%);
-  aspect-ratio: 16 / 7;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 62%;
+  height: 46%;
+  transform: translate(-50%, -50%) rotateX(34deg);
+  transform-style: preserve-3d;
   border-radius: 50%;
   background:
-    radial-gradient(ellipse at 50% 35%, #3d9e6b 0%, #2a7a50 45%, #1f5e3c 78%);
-  border: 14px solid #4a2e19;
+    radial-gradient(ellipse at 50% 28%, #46b078 0%, #2f8a5a 42%, #216340 74%, #194b2f 100%);
+  border: 12px solid #5a3a20;
+  outline: 3px solid #241509;
   box-shadow:
-    inset 0 0 30px rgba(0, 0, 0, 0.5),
-    inset 0 0 0 4px rgba(255, 220, 150, 0.15),
-    0 6px 18px rgba(0, 0, 0, 0.4);
+    /* thick wooden rail / depth under the felt */
+    0 22px 26px -6px rgba(0, 0, 0, 0.65),
+    0 12px 12px -8px #1c1108,
+    inset 0 0 40px rgba(0, 0, 0, 0.55),
+    inset 0 3px 0 rgba(255, 230, 170, 0.22),
+    inset 0 -18px 30px rgba(0, 0, 0, 0.4);
   display: flex;
   align-items: center;
   justify-content: center;
-  position: relative;
+  z-index: 2;
 }
 
+/* The community-card + pot zone sits on the felt, counter-tilted back to
+   roughly face the viewer so cards stay readable while the felt reads 3D. */
 .table__community {
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
   gap: 10px;
   margin: 0;
   min-height: 84px;
-  z-index: 1;
+  z-index: 3;
+  transform: rotateX(-34deg);
+  transform-style: preserve-3d;
 }
 
+.table__cardsrow {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}
+
+/* Players positioned absolutely around the rim (x/y set inline per seat). */
 .table__players {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 12px;
-  position: relative;
+  position: absolute;
+  inset: 0;
   z-index: 1;
+  pointer-events: none; /* let the felt/table receive clicks */
+}
+
+.table__players .seat {
+  pointer-events: auto;
 }
 
 .table__showdown {
@@ -384,17 +456,48 @@ h2 {
 }
 
 .seat {
-  position: relative;
-  background: rgba(0, 0, 0, 0.28);
-  border: 2px solid transparent;
-  border-radius: 12px;
-  padding: 12px;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 148px;
+  transform: translate(-50%, -50%);
+  background: rgba(12, 8, 5, 0.62);
+  border: 2px solid rgba(224, 179, 74, 0.28);
+  border-radius: 14px;
+  padding: 8px 10px 10px;
   text-align: center;
-  transition: border-color 0.15s ease;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 230, 170, 0.12);
+  backdrop-filter: blur(1px);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  z-index: 1;
+}
+
+/* Rim-point anchor: the seat card is centered on its (x%, y%) rim position,
+   then nudged so it reads as "seated" against the table edge. The figure
+   (head + body) sits at the TOP of the card, so far-rim seats show body
+   above the rail and near-rim (you) show the player "in front of" the table. */
+.seat::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -14px;
+  width: 0;
+  height: 0;
+  transform: translateX(-50%);
+  border-left: 9px solid transparent;
+  border-right: 9px solid transparent;
+  border-top: 14px solid rgba(224, 179, 74, 0.4);
+  opacity: 0;
 }
 
 .seat--you {
   border-color: var(--gold);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5), 0 0 0 2px rgba(224, 179, 74, 0.55);
+}
+
+/* Your seat gets the visible rim pointer (you sit "in front of" the table). */
+.seat--you::before {
+  opacity: 1;
 }
 
 .seat--acting {
@@ -1266,6 +1369,58 @@ h2 {
   }
 }
 
+/* ---------------------------------------------------------------------
+   Narrow screens: shrink the seats + figure so the around-the-oval layout
+   still fits without overflow. The rim math is % based, so it re-centers
+   automatically; we just make each seat card and its figure smaller.
+--------------------------------------------------------------------- */
+@media (max-width: 620px) {
+  .table__stage {
+    width: 92%;
+  }
+
+  .seat {
+    width: 108px;
+    padding: 6px 7px 8px;
+  }
+
+  .seat__name {
+    max-width: 92px;
+  }
+
+  .stickfigure {
+    width: 64px;
+    height: 80px;
+  }
+
+  .stickfigure__body {
+    width: 64px;
+    height: 80px;
+  }
+
+  .stickfigure__head {
+    width: 34px;
+    height: 34px;
+  }
+
+  .stickfigure .seatavatar {
+    width: 34px !important;
+    height: 34px !important;
+  }
+
+  .card {
+    width: 48px;
+    height: 68px;
+    font-size: 20px;
+  }
+
+  .card--small {
+    width: 34px;
+    height: 48px;
+    font-size: 15px;
+  }
+}
+
 /* ==================================================================== */
 /*  Sprint 5 — avatars, dealer button, cropper, settings, western pass  */
 /* ==================================================================== */
@@ -1924,7 +2079,7 @@ a:focus-visible,
   color: var(--gold);
 }
 
-/* --- Bet chip pile -------------------------------------------------------- */
+/* --- Bet chip pile (3D cylindrical chips) -------------------------------- */
 .seat__betchips {
   display: flex;
   justify-content: center;
@@ -1932,30 +2087,39 @@ a:focus-visible,
   min-height: 18px;
 }
 
+/* A 3D chip = a colored elliptical "top" + a darker "side" thickness below it,
+   so a stack of them reads as a pile of real poker chips (not flat coins).
+   Each disc is sized inline (width/height) by BetChips.jsx. */
 .betchips {
   display: inline-flex;
   flex-direction: column-reverse; /* first disc at the bottom of the pile */
   align-items: center;
-  gap: 3px;
+  gap: 2px;
   padding: 6px 4px 2px;
 }
 
 .betchips__disc {
-  border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.7);
-  box-shadow:
-    inset 0 0 0 2px rgba(0, 0, 0, 0.25),
-    0 1px 2px rgba(0, 0, 0, 0.45);
   position: relative;
+  border-radius: 50% / 50%;
+  /* top face: bright center fading to the rim (reads as the chip's top surface) */
+  background-image:
+    radial-gradient(ellipse at 50% 38%, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0.05) 42%, rgba(0, 0, 0, 0.28) 78%);
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  box-shadow:
+    /* the "side" of the cylinder: a darker band under the top ellipse */
+    0 3px 0 rgba(0, 0, 0, 0.35),
+    0 4px 5px rgba(0, 0, 0, 0.5);
+  aspect-ratio: 1 / 0.62; /* flatten to an ellipse so it reads as a top view */
+  height: auto;
 }
 
-/* chip-stripe ring (the classic casino edge) */
+/* the classic casino edge (dashed ring on the top face) */
 .betchips__disc::after {
   content: '';
   position: absolute;
-  inset: 2px;
-  border-radius: 50%;
-  border: 2px dashed rgba(255, 255, 255, 0.55);
+  inset: 12%;
+  border-radius: 50% / 62%;
+  border: 2px dashed rgba(255, 255, 255, 0.5);
 }
 
 .betchips__total {
@@ -1965,6 +2129,118 @@ a:focus-visible,
   color: var(--gold);
   margin-top: 2px;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+/* --- Player's main stack (ChipStack.jsx) as a 3D chip pile -----------------
+   Was previously unstyled (plain colored spans). Now each `.chip` is the same
+   3D elliptical top + side-thickness as `.betchips__disc`, stacked so the
+   player's bankroll reads as a physical pile in front of their seat. */
+.chipstack {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.chipstack__pile {
+  display: inline-flex;
+  flex-direction: column-reverse;
+  align-items: center;
+  gap: 1px;
+  padding: 4px 2px 2px;
+}
+
+.chip {
+  width: 26px;
+  height: 17px; /* flattened ellipse = top-view chip */
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  background-image:
+    radial-gradient(ellipse at 50% 36%, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0.04) 44%, rgba(0, 0, 0, 0.28) 80%);
+  box-shadow:
+    0 2px 0 rgba(0, 0, 0, 0.35),
+    0 3px 4px rgba(0, 0, 0, 0.5);
+}
+
+/* the casino edge ring on the chip top */
+.chip::after {
+  content: '';
+  position: absolute;
+  inset: 14%;
+  border-radius: 50%;
+  border: 1.5px dashed rgba(255, 255, 255, 0.45);
+}
+
+.chip {
+  position: relative;
+}
+
+.chip--empty {
+  background-image: none;
+  border: 2px dashed rgba(255, 255, 255, 0.25);
+  box-shadow: none;
+  width: 22px;
+  height: 14px;
+}
+
+.chipstack__label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--gold);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+  letter-spacing: 0.3px;
+}
+
+.chipstack__pile--push {
+  animation: chipPush 0.4s ease-out both;
+}
+
+@keyframes chipPush {
+  0%   { transform: translateY(-6px) scale(0.85); opacity: 0.4; }
+  60%  { transform: translateY(1px) scale(1.04); opacity: 1; }
+  100% { transform: translateY(0) scale(1); }
+}
+
+/* --- Center pot: a 3D chip stack on the felt ------------------------------
+   Rendered by Table.jsx inside `.table__community`, above the cards. A single
+   layered "tower" of chips whose height scales with the pot size (via the
+   `--pot-n` custom property set inline), so big pots look tall. */
+.potstack {
+  position: relative;
+  width: 44px;
+  min-height: 14px;
+  margin-bottom: 4px;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+  gap: 0;
+}
+
+.potstack__chip {
+  width: 40px;
+  height: 12px;
+  border-radius: 50%;
+  background-color: #c99a4d;
+  border: 2px solid rgba(255, 255, 255, 0.55);
+  background-image:
+    radial-gradient(ellipse at 50% 34%, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0.04) 46%, rgba(0, 0, 0, 0.3) 82%);
+  box-shadow:
+    0 2px 0 rgba(0, 0, 0, 0.4),
+    0 3px 4px rgba(0, 0, 0, 0.55);
+  position: relative;
+  margin-top: -6px; /* overlap so the chips form a continuous tower */
+}
+
+.potstack__chip:first-child {
+  margin-top: 0;
+}
+
+.potstack__chip::after {
+  content: '';
+  position: absolute;
+  inset: 16%;
+  border-radius: 50%;
+  border: 1.5px dashed rgba(255, 255, 255, 0.4);
 }
 
 @keyframes betChipPush {
@@ -1979,7 +2255,8 @@ a:focus-visible,
 
 /* --- Reduced motion: disable the new animations too ----------------------- */
 @media (prefers-reduced-motion: reduce) {
-  .betchips--push {
+  .betchips--push,
+  .chipstack__pile--push {
     animation: none !important;
   }
 }
