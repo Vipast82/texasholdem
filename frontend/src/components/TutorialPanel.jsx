@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useGameStore } from '../store.js';
-import { t, setLocale } from '../i18n.js';
+import { t } from '../i18n.js';
 import { TutorialEngine } from '../engine/tutorialEngine.js';
 import { narrationService } from '../engine/narrationService.js';
 import { strategyHint } from '@saloon/shared/tutorialHint';
@@ -13,44 +13,43 @@ import tutorialSeed from '../tutorial/tutorialSeed.json';
  * stream into it, and renders the localized history. The engine is pure;
  * this component is the I/O/UI boundary (socket, narration, i18n).
  */
+/** Monotonic id for tutorial log rows (stable React keys as rows are prepended). */
+let logSeq = 0;
+
 export default function TutorialPanel() {
   const tutorial = useGameStore((s) => s.tutorial);
   const tableId = useGameStore((s) => s.tableId);
-  const engineRef = useRef(null);
   const [history, setHistory] = useState([]);
   const [running, setRunning] = useState(false);
   const [paused, setPaused] = useState(false);
-
-  if (!engineRef.current) {
-    engineRef.current = new TutorialEngine({
-      content: loadTutorialContent(),
-      mode: tutorial.mode,
-      verbosity: tutorial.verbosity,
-      hintsEnabled: tutorial.hintsEnabled,
-      hintProvider: strategyHint,
-      narration: narrationService,
-      resolveText: (key, vars) => t(key, vars)
-    });
-  }
-  const engine = engineRef.current;
+  // One engine per mount (lazy init, so it is created exactly once).
+  const [engine] = useState(
+    () =>
+      new TutorialEngine({
+        content: loadTutorialContent(),
+        mode: tutorial.mode,
+        verbosity: tutorial.verbosity,
+        hintsEnabled: tutorial.hintsEnabled,
+        hintProvider: strategyHint,
+        narration: narrationService,
+        resolveText: (key, vars) => t(key, vars)
+      })
+  );
 
   useEffect(() => {
     engine.setMode(tutorial.mode);
     engine.setVerbosity(tutorial.verbosity);
     engine.setHintsEnabled(tutorial.hintsEnabled);
-    if (tutorial.mode !== 'guided') setPaused(false);
   }, [engine, tutorial.mode, tutorial.verbosity, tutorial.hintsEnabled]);
-
-  useEffect(() => {
-    if (tutorial.locale) setLocale(tutorial.locale);
-  }, [tutorial.locale]);
 
   useEffect(() => {
     const store = useGameStore.getState();
     store.setTutorialEventCb((event, payload) => {
       const item = engine.handleEvent(event, payload, hintContext(event, payload));
       if (item) {
-        setHistory((h) => [item, ...h].slice(0, 50));
+        logSeq += 1;
+        const entry = { ...item, logId: logSeq };
+        setHistory((h) => [entry, ...h].slice(0, 50));
         setPaused(!!item.paused);
       } else {
         // An event that produced no tutorial item clears any active pause.
@@ -71,10 +70,10 @@ export default function TutorialPanel() {
     }
   };
 
-  const isPaused = paused;
+  // Only guided mode ever pauses the table.
+  const isPaused = paused && tutorial.mode === 'guided';
   const modes = ['off', 'passive', 'guided'];
   const verbosities = ['concise', 'normal', 'detailed'];
-  const locales = ['en', 'es'];
 
   return (
     <section className="tutorial" aria-label={t('tutorial.panel')}>
@@ -115,19 +114,12 @@ export default function TutorialPanel() {
           ]}
           onChange={(v) => useGameStore.getState().setTutorial({ hintsEnabled: v === 'on' })}
         />
-        <Field
-          id="tut-locale"
-          label={t('settings.language')}
-          value={tutorial.locale}
-          options={locales.map((l) => ({ v: l, l: l.toUpperCase() }))}
-          onChange={(v) => useGameStore.getState().setLocale(v)}
-        />
       </div>
 
       <ul className="tutorial__log" role="log" aria-live="polite">
         {history.length === 0 && <li className="tutorial__empty">{t('tutorial.empty')}</li>}
         {history.map((item, i) => (
-          <li key={i} className={`tutorial__item ${i === 0 ? 'tutorial__item--current' : ''}`}>
+          <li key={item.logId} className={`tutorial__item ${i === 0 ? 'tutorial__item--current' : ''}`}>
             <span className="tutorial__title">{item.title}</span>
             {item.message && <div>{item.message}</div>}
             {renderHint(item)}

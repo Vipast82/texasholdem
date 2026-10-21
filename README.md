@@ -11,6 +11,10 @@ Local-network Texas Hold'em in an npm-workspaces monorepo:
 Ranks use `"T"` for ten (never `"10"`); suits are `s`/`h`/`d`/`c`. All randomness flows
 through the seeded `Rng` (`createShuffledDeck(seed)`) — same seed + same action sequence ⇒ identical hand.
 
+## Requirements
+
+Node.js **22.12 or newer** (Vite 8 and Vitest 5 require it).
+
 ## Environment (Windows)
 
 `node`/`npm` may not be on the default PATH. Prefix shell commands with:

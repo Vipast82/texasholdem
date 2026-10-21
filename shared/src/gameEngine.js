@@ -1,6 +1,12 @@
 import { createShuffledDeck } from './rng.js';
 import { minRaise, maxBet, maxRaisesPerStreet } from './bettingRules.js';
-import { showdown } from './handEvaluator.js';
+import { showdown, compareRanked } from './handEvaluator.js';
+import { computePots, distributePot } from './potSplit.js';
+
+function totalCommitted(p) {
+  const c = p.contributions;
+  return c.preflop + c.flop + c.turn + c.river;
+}
 
 /**
  * GameTable - authoritative Hold'em hand lifecycle.
@@ -56,6 +62,8 @@ export class GameTable {
     this.lastSeed = null; // deck seed actually used by the most recent hand
     this.lastPot = 0; // total pot at the moment the hand ended (before payout reset)
     this.lastEnd = null; // { reason, winnerId? } from the most recent finishHand
+    this.runoutFrom = null; // board size when an all-in runout began (null = no runout)
+    this._departed = []; // { id, committed } for players who left mid-hand (dead money)
     this.listeners = new Map();
   }
 
@@ -103,14 +111,25 @@ export class GameTable {
   removePlayer(id) {
     const i = this.players.findIndex((p) => p.id === id);
     if (i < 0) return false;
-    const [p] = this.players.splice(i, 1);
+    const p = this.players[i];
+    const wasInHand = this.inHand && p.status === 'in-hand';
+    // Whatever they already put in stays in the pot as dead money, so side-pot
+    // math still balances after their seat is gone.
+    if (wasInHand) {
+      const committed = totalCommitted(p);
+      if (committed > 0) this._departed.push({ id: p.id, committed });
+      p.hasFolded = true;
+      p.toAct = false;
+    }
+    this.players.splice(i, 1);
     this.seatToPlayer.delete(p.seat);
-    // If removing this player strands the table mid-hand (fewer than two
-    // active players), end the hand immediately: the pot is refunded to the
-    // sole remaining player (chips preserved) so the table returns to the
-    // idle state and no "Waiting for the next player…" limbo is left behind.
-    // See resolveOrphanedHand().
+    if (!wasInHand) return true;
+    // Fewer than two players left in the hand: end it and give the pot to the
+    // last one standing. See resolveOrphanedHand().
     this.resolveOrphanedHand();
+    // Otherwise the hand goes on — but the leaver may have been the last one
+    // still to act, so close the street if nobody else owes an action.
+    if (this.inHand && this.streetComplete) this.advanceStreet();
     return true;
   }
 
@@ -137,17 +156,24 @@ export class GameTable {
     const pot = this.pot;
     const payouts = {};
     if (pot > 0 && stillIn.length === 1) {
-      // Sole remaining player: refund the ENTIRE pot (chips preserved).
-      // Fairness: the departing player(s) lost their blinds/bets, but the
-      // remaining player did NOT "win" against them — the table just emptied.
-      // Refunding the full pot to them avoids destroying chips.
+      // Sole remaining player takes the whole pot so no chips are destroyed.
       const p = stillIn[0];
       payouts[p.id] = pot;
       p.chips += pot;
     }
     this.payouts = payouts;
     this.lastShowdown = null;
-    this.finishHand({ winnerId: null, reason: 'table-orphaned' });
+    this.finishHand({ winnerId: stillIn.length === 1 ? stillIn[0].id : null, reason: 'table-orphaned' });
+  }
+
+  /** A busted player buys back in for a fresh starting stack (never mid-hand). */
+  rebuy(id) {
+    const p = this.playerById(id);
+    if (!p) throw new Error(`unknown player ${id}`);
+    if (p.chips > 0) throw new Error('you still have chips');
+    if (p.status === 'in-hand') throw new Error('wait for the hand to end');
+    p.chips = this.startingStack;
+    return p.chips;
   }
 
   playerById(id) {
@@ -163,10 +189,9 @@ export class GameTable {
       .sort((a, b) => a - b);
   }
 
+  /** Next seat clockwise from `seat` (which need not itself be in `seats`). */
   seatAfter(seat, seats) {
-    const idx = seats.indexOf(seat);
-    if (idx < 0) return seats[0];
-    return seats[(idx + 1) % seats.length];
+    return seats.find((s) => s > seat) ?? seats[0];
   }
 
   /**
@@ -209,6 +234,8 @@ export class GameTable {
     this.raiseCount = 0;
     this.payouts = {};
     this.lastShowdown = null;
+    this._departed = [];
+    this.runoutFrom = null;
 
     for (const p of this.players) {
       if (p.status === 'seated') {
@@ -220,7 +247,9 @@ export class GameTable {
       }
     }
 
-    const seats = this.activeSeats();
+    // Button and blinds only move between players who are actually dealt in
+    // (a busted 0-chip seat never gets the button or a blind).
+    const seats = active.map((p) => p.seat).sort((a, b) => a - b);
     this.dealerSeat = this.seatAfter(this.dealerSeat, seats);
 
     this.activePlayers = active.map((p) => p.id);
@@ -229,15 +258,17 @@ export class GameTable {
       p.status = 'in-hand';
     }
 
-    const sbSeat = this.seatAfter(this.dealerSeat, seats);
+    // Heads-up: the button posts the small blind and acts first preflop, last
+    // after the flop. With 3+ players the small blind sits left of the button.
+    const sbSeat = seats.length === 2 ? this.dealerSeat : this.seatAfter(this.dealerSeat, seats);
     const bbSeat = this.seatAfter(sbSeat, seats);
     const sbId = this.seatToPlayer.get(sbSeat);
     const bbId = this.seatToPlayer.get(bbSeat);
 
     // Post blinds first so all-in blinds are excluded from the action list.
-    this.postBlind(sbId, this.smallBlind);
-    this.postBlind(bbId, this.bigBlind);
-    this.pot = this.smallBlind + this.bigBlind;
+    // A short stack may post less than the full blind, so the pot is what was
+    // actually posted, not smallBlind + bigBlind.
+    this.pot = this.postBlind(sbId, this.smallBlind) + this.postBlind(bbId, this.bigBlind);
 
     // Set up the preflop betting round (resets street/raise state + toAct flags).
     const utgSeat = this.seatAfter(bbSeat, seats);
@@ -247,6 +278,9 @@ export class GameTable {
     this.emit('handStarted', this.snapshot());
     this.emit('blindsPosted', { sb: sbId, bb: bbId, smallBlind: this.smallBlind, bigBlind: this.bigBlind });
     this.emit('holeDealt', this.snapshot());
+    // Blinds can put everyone (or all but one uncontested player) all-in
+    // before anyone acts; deal the board out instead of waiting forever.
+    if (this.streetComplete) this.advanceStreet();
     return this.snapshot();
   }
 
@@ -256,6 +290,7 @@ export class GameTable {
     p.chips -= pay;
     p.contributions.preflop += pay;
     if (p.chips === 0) p.isAllIn = true;
+    return pay;
   }
 
   // ---------------------------------------------------------------- betting
@@ -277,9 +312,17 @@ export class GameTable {
     return null;
   }
 
+  /**
+   * The betting round is over when nobody still owes an action. A player who
+   * is the only one left with chips only needs to act if they face a bet
+   * (e.g. calling or folding to an all-in) — otherwise there is nobody left
+   * to bet against.
+   */
   get streetComplete() {
     const canAct = this.canActPlayers();
-    return canAct.length <= 1 || !canAct.some((p) => p.toAct);
+    if (canAct.length > 1) return !canAct.some((p) => p.toAct);
+    const [last] = canAct;
+    return !last || !last.toAct || last.contributions[this.street] >= this.currentBet;
   }
 
   get handOver() {
@@ -309,6 +352,12 @@ export class GameTable {
     if (this.nextActorId() !== playerId) throw new Error(`${playerId} is not to act`);
     if (actor.hasFolded) throw new Error('already folded');
     if (actor.chips <= 0) throw new Error('already all in');
+    if (action === 'bet' || action === 'raise') {
+      // Amounts come straight off the network: insist on a whole chip count so
+      // a string or fraction can never corrupt the pot arithmetic.
+      amount = Number(amount);
+      if (!Number.isInteger(amount) || amount <= 0) throw new Error('amount must be a positive whole number');
+    }
 
     const street = this.street;
     const toCall = Math.max(0, this.currentBet - actor.contributions[street]);
@@ -385,9 +434,15 @@ export class GameTable {
     } else {
       actor.toAct = false;
       if (isRaise && newBetLevel > this.currentBet) {
-        this.lastRaiseIncrement = newBetLevel - this.currentBet;
+        const increment = newBetLevel - this.currentBet;
+        // A short all-in that is less than a full raise does not lower the
+        // minimum raise for the next player and does not count as a raise.
+        const fullRaise = this.currentBet === 0 || increment >= Math.max(this.lastRaiseIncrement, this.bigBlind);
+        if (fullRaise) {
+          this.lastRaiseIncrement = increment;
+          this.raiseCount += 1;
+        }
         this.currentBet = newBetLevel;
-        this.raiseCount += 1;
         for (const p of this.players) {
           if (p.status === 'in-hand' && !p.hasFolded && p.id !== actor.id && p.chips > 0) {
             p.toAct = true;
@@ -445,6 +500,7 @@ export class GameTable {
 
   /** No more betting possible: deal the remaining board cards, then showdown. */
   runout() {
+    if (this.community.length < 5) this.runoutFrom = this.community.length;
     while (this.community.length < 5) {
       this.deck.pop(); // burn
       this.community.push(this.deck.pop());
@@ -476,27 +532,38 @@ export class GameTable {
       return ordered.map((seat) => this.seatToPlayer.get(seat));
     };
 
-    // Side pots: distinct commitment levels, each paid to eligible winners
-    const commitments = this.players
-      .filter((p) => this.activePlayers.includes(p.id))
-      .map((p) => ({
-        id: p.id,
-        committed: p.contributions.preflop + p.contributions.flop + p.contributions.turn + p.contributions.river
-      }));
-    const levels = [...new Set(commitments.map((c) => c.committed))].sort((a, b) => a - b).filter((l) => l > 0);
+    // Main + side pots. Folded players and players who left mid-hand still
+    // fund the pots they paid into; only players still in can win them, and
+    // each pot goes to the best hand among the players eligible for it.
+    const commitments = [
+      ...this.players
+        .filter((p) => this.activePlayers.includes(p.id))
+        .map((p) => ({ id: p.id, committed: totalCommitted(p) })),
+      ...this._departed
+    ];
+    const contenders = new Set(stillIn.map((p) => p.id));
     const payouts = {};
-    for (let i = 0; i < levels.length; i += 1) {
-      const level = levels[i];
-      const lower = i > 0 ? levels[i - 1] : 0;
-      const contributors = commitments.filter((c) => c.committed >= level);
-      const amount = (level - lower) * contributors.length;
-      const winners = orderWinners(contributors.map((c) => c.id).filter((id) => result.winnerIds.includes(id)));
-      if (!winners.length) continue;
-      const share = Math.floor(amount / winners.length);
-      const odd = amount - share * winners.length;
-      winners.forEach((id, wi) => {
-        payouts[id] = (payouts[id] || 0) + share + (wi === 0 ? odd : 0);
-      });
+    let carry = 0; // a pot nobody still in paid into rolls into the next one
+    for (const pot of computePots(commitments)) {
+      const eligible = pot.eligible.filter((id) => contenders.has(id));
+      if (!eligible.length) {
+        carry += pot.amount;
+        continue;
+      }
+      const best = eligible.reduce((a, b) => (compareRanked(result.all[b], result.all[a]) > 0 ? b : a));
+      const winners = orderWinners(eligible.filter((id) => compareRanked(result.all[id], result.all[best]) === 0));
+      for (const [id, share] of Object.entries(distributePot(pot.amount + carry, winners))) {
+        payouts[id] = (payouts[id] || 0) + share;
+      }
+      carry = 0;
+    }
+    if (carry > 0) {
+      // Only possible when the top pots were funded solely by folded players:
+      // give it to the overall winner(s).
+      const winners = orderWinners(result.winnerIds);
+      for (const [id, share] of Object.entries(distributePot(carry, winners))) {
+        payouts[id] = (payouts[id] || 0) + share;
+      }
     }
     for (const [id, amount] of Object.entries(payouts)) {
       const p = this.playerById(id);
@@ -510,7 +577,9 @@ export class GameTable {
   finishHand(meta) {
     for (const p of this.players) {
       if (p.status === 'in-hand') p.status = 'seated';
+      p.toAct = false;
     }
+    this._actionOrder = [];
     this.lastPot = this.pot; // capture before the pot is reset to 0
     this.lastEnd = { reason: meta && meta.reason, winnerId: meta ? meta.winnerId : null };
     this.street = 'ended';
@@ -560,6 +629,7 @@ export class GameTable {
       streetComplete: this.streetComplete,
       inHand: this.inHand,
       lastShowdown: this.lastShowdown,
+      runoutFrom: this.runoutFrom,
       payouts: this.payouts,
       players: this.players.map((p) => ({
         id: p.id,

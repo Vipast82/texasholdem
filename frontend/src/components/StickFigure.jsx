@@ -40,7 +40,7 @@ export default function StickFigure({ player, pose = 'idle', emote = null, isMe 
 
       {/* Avatar head (SeatAvatar, circular, overlaid on the SVG head position) */}
       <div className="stickfigure__head">
-        <SeatAvatar player={player} size={44} isMe={isMe} />
+        <SeatAvatar player={player} size={34} isMe={isMe} />
       </div>
 
       {/* Stick body (SVG). Arms are <g> groups rotated by pose classes. */}

@@ -29,10 +29,11 @@ export default function HudOdds({ snapshot, playerId }) {
   if (!equity) return null;
 
   return (
-    <div className="hud" title={t('hud.tip', { n: equity.iterations })}>
-      <span className="hud__win">{t('hud.win')} {pct(equity.win)}</span>
-      <span className="hud__tie">{t('hud.tie')} {pct(equity.tie)}</span>
-      <span className="hud__lose">{t('hud.lose')} {pct(equity.lose)}</span>
+    <div
+      className="hud"
+      title={`${t('hud.tie')} ${pct(equity.tie)} · ${t('hud.lose')} ${pct(equity.lose)} — ${t('hud.tip', { n: equity.iterations })}`}
+    >
+      {t('hud.win')} {pct(equity.win)}
     </div>
   );
 }

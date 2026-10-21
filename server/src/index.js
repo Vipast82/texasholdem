@@ -52,6 +52,7 @@ app.get('/health', (req, res) => res.json({ ok: true, name: 'saloon-server' }));
 // a missing blob just falls back to the neutral default seat avatar.
 const avatarBlobs = new Map(); // avatarId -> { blob, mime }
 const MAX_AVATAR_UPLOAD = 20 * 1024 * 1024; // 20 MB, matches the client cap
+const MAX_AVATARS = 64; // oldest uploads are evicted past this
 
 app.post('/avatars/:id', express.raw({ type: () => true, limit: MAX_AVATAR_UPLOAD }), (req, res) => {
   const id = String(req.params.id || '');
@@ -69,6 +70,13 @@ app.post('/avatars/:id', express.raw({ type: () => true, limit: MAX_AVATAR_UPLOA
     return;
   }
   const mime = String(req.get('content-type') || '').split(';')[0].trim() || 'application/octet-stream';
+  if (!mime.startsWith('image/')) {
+    res.status(415).json({ ok: false, error: 'avatars must be images' });
+    return;
+  }
+  // Keep memory bounded: Map preserves insertion order, so evict the oldest.
+  avatarBlobs.delete(id);
+  while (avatarBlobs.size >= MAX_AVATARS) avatarBlobs.delete(avatarBlobs.keys().next().value);
   avatarBlobs.set(id, { blob: body, mime });
   res.json({ ok: true });
 });
@@ -113,7 +121,7 @@ function broadcast(tableId) {
   notifySpectators(tableId);
 }
 
-function assignSeat(table, _playerId) {
+function assignSeat(table) {
   const taken = new Set(table.players.map((p) => p.seat));
   for (let s = 0; s < 10; s += 1) {
     if (!taken.has(s)) return s;
@@ -398,6 +406,11 @@ function recordHand(tableId, table) {
     return null;
   }
   if (!rec) return null;
+  // Records go to everyone at the table, so only reveal hands that were
+  // actually shown down — never folded or uncalled hole cards.
+  for (const p of rec.players) {
+    if (!p.bestHand) p.holeCards = null;
+  }
   handHistory.push(rec);
   if (handHistory.length > HAND_HISTORY_CAP) {
     handHistory.splice(0, handHistory.length - HAND_HISTORY_CAP);
@@ -437,8 +450,58 @@ function setHandSeed(table, seed) {
 
 // ----------------------------------------------------------------- sockets
 
+/** Drop a table once nobody is seated at it or watching it. */
+function teardownIfEmpty(tableId) {
+  const entry = store.get(tableId);
+  if (!entry || entry.players.size > 0 || autoAdvancePaused(tableId)) return;
+  const pump = pumps.get(tableId);
+  if (pump && pump.timer) clearTimeout(pump.timer);
+  pumps.delete(tableId);
+  mirrored.delete(tableId);
+  store.delete(tableId);
+}
+
+/** Stop watching every table this socket is spectating. */
+function dropSpectator(socketId) {
+  for (const [tableId, set] of [...spectators.entries()]) {
+    if (!set.delete(socketId)) continue;
+    if (set.size === 0) spectators.delete(tableId);
+    pumpTable(tableId); // the last watcher left — resume auto-advance
+    teardownIfEmpty(tableId);
+  }
+}
+
 io.on('connection', (socket) => {
   let binding = null; // { tableId, playerId }
+
+  /**
+   * Register a socket handler. The handler always receives a plain-object
+   * payload and a `reply` function (a no-op if the client sent no callback).
+   * A thrown error becomes `{ ok: false, error }` instead of crashing the
+   * server, so a malformed message can never take the game down.
+   */
+  const on = (event, handler) => {
+    socket.on(event, (...args) => {
+      const ack = typeof args[args.length - 1] === 'function' ? args.pop() : null;
+      const payload = args[0] && typeof args[0] === 'object' ? args[0] : {};
+      const reply = (res) => {
+        if (ack) ack(res);
+      };
+      try {
+        handler(payload, reply);
+      } catch (err) {
+        reply({ ok: false, error: (err && err.message) || 'server error' });
+      }
+    });
+  };
+
+  /** The table this socket is seated at (throws if it is not seated). */
+  const seatedEntry = () => {
+    if (!binding) throw new Error('join a table first');
+    const entry = store.get(binding.tableId);
+    if (!entry) throw new Error('table not found');
+    return entry;
+  };
 
   const unbind = () => {
     if (binding) {
@@ -461,340 +524,249 @@ io.on('connection', (socket) => {
           }
         }
         broadcast(tableId);
+        // The leaver may have been holding up a bot's turn.
+        pumpTable(tableId);
+        teardownIfEmpty(tableId);
       }
     }
     // Drop any spectator session for this socket so auto-advance can resume.
-    for (const [tableId, set] of [...spectators.entries()]) {
-      if (set.delete(socket.id)) {
-        const empty = set.size === 0;
-        if (empty) spectators.delete(tableId);
-        if (empty) pumpTable(tableId); // last watcher left — resume auto-advance
-      }
-    }
+    dropSpectator(socket.id);
   };
 
-  socket.on('listTables', (ack) => {
-    if (typeof ack === 'function') ack(store.listTables());
+  /** Seat a server-driven AI player (no socket of its own). */
+  const seatBot = (entry, difficulty) => {
+    const seat = assignSeat(entry.table);
+    if (seat < 0) throw new Error('table full');
+    const profile = getProfile(difficulty);
+    const botId = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const botName = pickBotName(profile, new Rng(`name:${botId}`));
+    entry.table.addPlayer({ id: botId, name: botName, seat, isBot: true, bot: { difficulty } });
+    entry.players.set(botId, { name: botName, socketId: null });
+    return botId;
+  };
+
+  on('listTables', (_payload, reply) => {
+    reply(store.listTables());
   });
 
-  socket.on('joinTable', ({ tableId, name, isBot, bot, spawnBot, botDifficulty, avatarMeta }, ack) => {
-    try {
-      const entry = store.getOrCreate(tableId);
-      // One socket = one player (local game). Use the socket id as the player id
-      // so two browser tabs are two distinct players.
-      const playerId = socket.id;
-      if (entry.players.has(playerId)) {
-        throw new Error('you already have a seat at this table');
-      }
-      const seat = assignSeat(entry.table, playerId);
-      if (seat < 0) throw new Error('table full');
-      // Sprint 5: avatarMeta is SMALL metadata only (avatarId + crop + kind).
-      // The binary NEVER crosses the wire — see sanitizeAvatarMeta + the client
-      // avatarStore. We defensively strip anything that looks like binary data.
-      entry.table.addPlayer({
-        id: playerId,
-        name: name || 'Player',
-        seat,
-        isBot,
-        bot,
-        avatarMeta: sanitizeAvatarMeta(avatarMeta)
-      });
-      entry.players.set(playerId, { name: name || 'Player', socketId: socket.id });
-      binding = { tableId, playerId };
-      socket.join(tableRoom(tableId));
-      // Make sure this table's GameTable events are mirrored to the room so
-      // any connected tutorial engine can receive gameEvent broadcasts.
-      mirrorTableEvents(tableId);
-
-      // "Play vs AI": the human just joined — seat an AI opponent so they have
-      // someone to play against. The bot is a server-side player (no socket of
-      // its own); the bot loop drives it.
-      if (spawnBot && !isBot) {
-        const botSeat = assignSeat(entry.table, 'ai-opponent');
-        if (botSeat >= 0) {
-          const diff = botDifficulty || 'normal';
-          const profile = getProfile(diff);
-          const botId = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-          const botName = pickBotName(profile, new Rng(`name:${botId}`));
-          entry.table.addPlayer({ id: botId, name: botName, seat: botSeat, isBot: true, bot: { difficulty: diff } });
-          // The bot has no socket — the broadcast loop just skips it.
-          entry.players.set(botId, { name: botName, socketId: null });
-        }
-      }
-
-      if (typeof ack === 'function') ack({ ok: true, playerId });
-      broadcast(tableId);
-      // An AI-only table should start playing on its own.
-      pumpTable(tableId);
-    } catch (err) {
-      if (typeof ack === 'function') ack({ ok: false, error: err.message });
-    }
-  });
-
-  socket.on('startHand', (payload, ack) => {
-    try {
-      if (!binding) throw new Error('join a table first');
-      const entry = store.get(binding.tableId);
-      // Optional seeded walkthrough (tutorial): set the deck seed BEFORE the
-      // hand starts so the shuffle reproduces the same hand.
-      if (payload && payload.seed != null) setHandSeed(entry.table, payload.seed);
-      mirrorTableEvents(binding.tableId);
-      entry.table.startHand();
-      if (typeof ack === 'function') ack({ ok: true, snapshot: entry.table.snapshotFor(binding.playerId) });
-      broadcast(binding.tableId);
-      // If the first actor to act is a bot (e.g. the dealer is a bot), play it now.
-      pumpTable(binding.tableId);
-    } catch (err) {
-      if (typeof ack === 'function') ack({ ok: false, error: err.message });
-    }
-  });
-
-  socket.on('playerAction', ({ action, amount }, ack) => {
-    try {
-      if (!binding) throw new Error('join a table first');
-      const entry = store.get(binding.tableId);
-      entry.table.applyAction(binding.playerId, action, amount || 0);
-      if (typeof ack === 'function') ack({ ok: true, snapshot: entry.table.snapshotFor(binding.playerId) });
-      broadcast(binding.tableId);
-      // If a bot is now to act, let it play (and chain on subsequent bots).
-      pumpTable(binding.tableId);
-    } catch (err) {
-      if (typeof ack === 'function') ack({ ok: false, error: err.message });
-    }
-  });
-
-  socket.on('chatMessage', ({ text }) => {
-    if (!binding) return;
-    const entry = store.get(binding.tableId);
-    const name = (entry.players.get(binding.playerId) || {}).name || 'Player';
-    io.to(tableRoom(binding.tableId)).emit('chatMessage', {
-      from: name,
-      text: String(text).slice(0, 400),
-      ts: Date.now()
+  on('joinTable', ({ tableId, name, isBot, bot, spawnBot, botDifficulty, avatarMeta }, reply) => {
+    if (typeof tableId !== 'string' || !tableId.trim()) throw new Error('table name required');
+    if (binding) throw new Error('you already have a seat — leave first');
+    const id = tableId.trim().slice(0, 64);
+    const playerName = (typeof name === 'string' && name.trim().slice(0, 32)) || 'Player';
+    const entry = store.getOrCreate(id);
+    // One socket = one player (local game). Use the socket id as the player id
+    // so two browser tabs are two distinct players.
+    const playerId = socket.id;
+    if (entry.players.has(playerId)) throw new Error('you already have a seat at this table');
+    const seat = assignSeat(entry.table);
+    if (seat < 0) throw new Error('table full');
+    // avatarMeta is SMALL metadata only (avatarId + crop + kind); the binary
+    // never crosses the socket — see sanitizeAvatarMeta.
+    entry.table.addPlayer({
+      id: playerId,
+      name: playerName,
+      seat,
+      isBot: !!isBot,
+      bot,
+      avatarMeta: sanitizeAvatarMeta(avatarMeta)
     });
+    entry.players.set(playerId, { name: playerName, socketId: socket.id });
+    binding = { tableId: id, playerId };
+    socket.join(tableRoom(id));
+    // Make sure this table's GameTable events are mirrored to the room so
+    // any connected tutorial engine can receive gameEvent broadcasts.
+    mirrorTableEvents(id);
+
+    // "Play vs AI": seat an AI opponent so the human has someone to play.
+    if (spawnBot && !isBot && assignSeat(entry.table) >= 0) {
+      seatBot(entry, normalizeDifficulty(botDifficulty));
+    }
+
+    reply({ ok: true, playerId, tableId: id });
+    broadcast(id);
+    // An AI-only table should start playing on its own.
+    pumpTable(id);
+  });
+
+  on('startHand', (payload, reply) => {
+    const entry = seatedEntry();
+    // Optional seeded walkthrough (tutorial): set the deck seed BEFORE the
+    // hand starts so the shuffle reproduces the same hand.
+    if (payload.seed != null) setHandSeed(entry.table, payload.seed);
+    mirrorTableEvents(binding.tableId);
+    entry.table.startHand();
+    reply({ ok: true, snapshot: entry.table.snapshotFor(binding.playerId) });
+    broadcast(binding.tableId);
+    // If the first actor to act is a bot (e.g. the dealer is a bot), play it now.
+    pumpTable(binding.tableId);
+  });
+
+  on('playerAction', ({ action, amount }, reply) => {
+    const entry = seatedEntry();
+    entry.table.applyAction(binding.playerId, action, amount || 0);
+    reply({ ok: true, snapshot: entry.table.snapshotFor(binding.playerId) });
+    broadcast(binding.tableId);
+    // If a bot is now to act, let it play (and chain on subsequent bots).
+    pumpTable(binding.tableId);
+  });
+
+  on('rebuy', (_payload, reply) => {
+    const entry = seatedEntry();
+    const chips = entry.table.rebuy(binding.playerId);
+    reply({ ok: true, chips });
+    broadcast(binding.tableId);
+    pumpTable(binding.tableId);
+  });
+
+  on('chatMessage', ({ text }) => {
+    const entry = seatedEntry();
+    const clean = String(text ?? '').trim().slice(0, 400);
+    if (!clean) return;
+    const name = (entry.players.get(binding.playerId) || {}).name || 'Player';
+    io.to(tableRoom(binding.tableId)).emit('chatMessage', { from: name, text: clean, ts: Date.now() });
   });
 
   /**
-   * Sprint 7 — emote RELAY. Previously emotes were local-only (only the sender
-   * saw the bubble). Now the sender emits `emote { playerId, code }` and the
-   * server re-broadcasts it to the whole table room, so every other seat renders
-   * the bubble above the sender's stick figure. The code is validated against
-   * the shared palette on the client; the server just relays the small payload.
-   * Emotes require no game state — they work for players (and are safe even if
-   * `binding` is missing, in which case we simply drop them).
+   * Emote relay: the sender emits `emote { playerId, code }` and the server
+   * re-broadcasts it to the table room so every seat renders the bubble. The
+   * code is validated against the shared palette on the client.
    */
-  socket.on('emote', ({ playerId, code }, ack) => {
-    if (!binding) {
-      if (typeof ack === 'function') ack({ ok: false, error: 'join a table first' });
-      return;
-    }
-    const entry = store.get(binding.tableId);
+  on('emote', ({ playerId, code }, reply) => {
+    const entry = seatedEntry();
     const targetId = String(playerId || binding.playerId);
     // Only allow emotes for a player actually seated at this table.
-    if (!entry || !entry.table.players.some((p) => p.id === targetId)) {
-      if (typeof ack === 'function') ack({ ok: false, error: 'unknown player' });
-      return;
-    }
+    if (!entry.table.players.some((p) => p.id === targetId)) throw new Error('unknown player');
     const safeCode = typeof code === 'string' ? code.slice(0, 32) : '';
     io.to(tableRoom(binding.tableId)).emit('emote', { playerId: targetId, code: safeCode, ts: Date.now() });
-    if (typeof ack === 'function') ack({ ok: true, playerId: targetId, code: safeCode });
+    reply({ ok: true, playerId: targetId, code: safeCode });
   });
 
   /**
-   * Sprint 7 — live avatar update. `avatarMeta` is set only ONCE, at
-   * `joinTable`. When the player picks a NEW avatar (or clears it) afterwards,
-   * the blob is POSTed to `/avatars/:id`, but the server never learns the new
-   * id — so every OTHER seat keeps resolving the stale/missing id and renders
-   * the default stick figure. This handler attaches the current (sanitized)
-   * avatarMeta to the caller's own player and re-broadcasts the snapshot so
-   * the other seats re-fetch the shared blob and show the new avatar
-   * immediately — no re-join required.
+   * Live avatar update: attach the caller's new (sanitized) avatarMeta to their
+   * seat and re-broadcast, so the other seats re-fetch the shared blob without
+   * a re-join. `avatarMeta: null` clears it.
    */
-  socket.on('updateAvatar', ({ avatarMeta }, ack) => {
-    try {
-      if (!binding) throw new Error('join a table first');
-      const entry = store.get(binding.tableId);
-      if (!entry) throw new Error('table not found');
-      const me = entry.table.players.find((p) => p.id === binding.playerId);
-      if (!me) throw new Error('no seat at this table');
-      me.avatarMeta = sanitizeAvatarMeta(avatarMeta); // null when clearing
-      broadcast(binding.tableId);
-      if (typeof ack === 'function') ack({ ok: true, avatarMeta: me.avatarMeta });
-    } catch (err) {
-      if (typeof ack === 'function') ack({ ok: false, error: err.message });
-    }
+  on('updateAvatar', ({ avatarMeta }, reply) => {
+    const entry = seatedEntry();
+    const me = entry.table.playerById(binding.playerId);
+    if (!me) throw new Error('no seat at this table');
+    me.avatarMeta = sanitizeAvatarMeta(avatarMeta);
+    broadcast(binding.tableId);
+    reply({ ok: true, avatarMeta: me.avatarMeta });
   });
 
-  socket.on('leaveTable', (ack) => {
-    if (binding) unbind();
-    // Spectators have no `binding` — the fix for "Leave does nothing while
-    // spectating": drop this socket's spectator session(s) so it stops
-    // watching (and auto-advance can resume if it was the last watcher).
-    if (!binding) {
-      for (const [tableId, set] of [...spectators.entries()]) {
-        if (set.delete(socket.id)) {
-          if (set.size === 0) spectators.delete(tableId);
-          pumpTable(tableId);
-        }
-      }
-    }
-    if (typeof ack === 'function') ack({ ok: true });
+  on('leaveTable', (_payload, reply) => {
+    // Covers both seated players and spectators (unbind drops both).
+    unbind();
+    reply({ ok: true });
   });
 
-  /**
-   * Add an AI opponent to a table at-will (Sprint 7). Usable by a seated
-   * player (binding) or a spectator. This is the "dealer adds AI players"
-   * and "spectate N AI play" capability.
-   */
-  socket.on('addBot', ({ tableId, botDifficulty }, ack) => {
-    try {
-      if (!tableId) throw new Error('tableId required');
-      const entry = store.get(tableId);
-      if (!entry) throw new Error('table not found');
-      const diff = normalizeDifficulty(botDifficulty || 'normal');
-      const botSeat = assignSeat(entry.table, 'ai');
-      if (botSeat < 0) throw new Error('table full');
-      const profile = getProfile(diff);
-      const botId = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const botName = pickBotName(profile, new Rng(`name:${botId}`));
-      entry.table.addPlayer({ id: botId, name: botName, seat: botSeat, isBot: true, bot: { difficulty: diff } });
-      entry.players.set(botId, { name: botName, socketId: null });
-      mirrorTableEvents(tableId);
-      if (typeof ack === 'function') ack({ ok: true, botId });
-      broadcast(tableId);
-      pumpTable(tableId);
-    } catch (err) {
-      if (typeof ack === 'function') ack({ ok: false, error: err.message });
-    }
+  /** Add an AI opponent at-will. Usable by a seated player or a spectator. */
+  on('addBot', ({ tableId, botDifficulty }, reply) => {
+    if (!tableId) throw new Error('tableId required');
+    const entry = store.get(tableId);
+    if (!entry) throw new Error('table not found');
+    const botId = seatBot(entry, normalizeDifficulty(botDifficulty));
+    mirrorTableEvents(tableId);
+    reply({ ok: true, botId });
+    broadcast(tableId);
+    pumpTable(tableId);
   });
 
-  /**
-   * Remove a specific AI player from a table at-will (Sprint 7). Only bots can
-   * be removed (never a human seat). If the table becomes empty it is torn down.
-   */
-  socket.on('removeBot', ({ tableId, botId }, ack) => {
-    try {
-      if (!tableId) throw new Error('tableId required');
-      const entry = store.get(tableId);
-      if (!entry) throw new Error('table not found');
-      const meta = entry.players.get(botId);
-      const player = entry.table.playerById(botId);
-      if (!meta || !player || !player.isBot) throw new Error('that seat is not a removable AI player');
-      if (entry.table.inHand) throw new Error('wait for the hand to end before removing a player');
-      entry.players.delete(botId);
-      entry.table.removePlayer(botId);
-      if (typeof ack === 'function') ack({ ok: true });
-      broadcast(tableId);
-      pumpTable(tableId);
-    } catch (err) {
-      if (typeof ack === 'function') ack({ ok: false, error: err.message });
-    }
+  /** Remove an AI player between hands (never a human seat). */
+  on('removeBot', ({ tableId, botId }, reply) => {
+    if (!tableId) throw new Error('tableId required');
+    const entry = store.get(tableId);
+    if (!entry) throw new Error('table not found');
+    const meta = entry.players.get(botId);
+    const player = entry.table.playerById(botId);
+    if (!meta || !player || !player.isBot) throw new Error('that seat is not a removable AI player');
+    if (entry.table.inHand) throw new Error('wait for the hand to end before removing a player');
+    entry.players.delete(botId);
+    entry.table.removePlayer(botId);
+    reply({ ok: true });
+    broadcast(tableId);
+    pumpTable(tableId);
   });
 
   // ------------------------------------------------------------- spectators
   // A socket is either a live player (binding) or a spectator — never both.
   // Spectators hold no seat and can see every hole card (server-authorized).
 
-  socket.on('enterSpectator', ({ tableId, showAllCards }, ack) => {
-    try {
-      if (!tableId) throw new Error('tableId required');
-      const entry = store.get(tableId);
-      if (!entry) throw new Error('table not found');
-      if (binding) throw new Error('you already have a seat here — leave first');
-      let set = spectators.get(tableId);
-      if (!set) {
-        set = new Map();
-        spectators.set(tableId, set);
-      }
-      set.set(socket.id, { showAllCards: !!showAllCards });
-      socket.join(tableRoom(tableId));
-      mirrorTableEvents(tableId);
-      if (typeof ack === 'function') {
-        ack({ ok: true, snapshot: spectatorSnapshot(entry, socket.id) });
-      }
-      // Presence changes: broadcast the (possibly frozen) state to all watchers.
-      notifySpectators(tableId);
-    } catch (err) {
-      if (typeof ack === 'function') ack({ ok: false, error: err.message });
+  on('enterSpectator', ({ tableId, showAllCards }, reply) => {
+    if (!tableId) throw new Error('tableId required');
+    const entry = store.get(tableId);
+    if (!entry) throw new Error('table not found');
+    if (binding) throw new Error('you already have a seat here — leave first');
+    let set = spectators.get(tableId);
+    if (!set) {
+      set = new Map();
+      spectators.set(tableId, set);
     }
+    set.set(socket.id, { showAllCards: !!showAllCards });
+    socket.join(tableRoom(tableId));
+    mirrorTableEvents(tableId);
+    reply({ ok: true, snapshot: spectatorSnapshot(entry, socket.id) });
+    // Presence changes: broadcast the (possibly frozen) state to all watchers.
+    notifySpectators(tableId);
   });
 
-  socket.on('setShowAllCards', ({ tableId, on }, ack) => {
-    try {
-      const set = spectators.get(tableId);
-      const meta = set && set.get(socket.id);
-      if (!meta) throw new Error('not a spectator on this table');
-      meta.showAllCards = on === true;
-      if (typeof ack === 'function') {
-        const entry = store.get(tableId);
-        ack({ ok: true, snapshot: entry ? spectatorSnapshot(entry, socket.id) : null });
-      }
-      notifySpectators(tableId);
-    } catch (err) {
-      if (typeof ack === 'function') ack({ ok: false, error: err.message });
-    }
+  on('setShowAllCards', ({ tableId, on: showAll }, reply) => {
+    const set = spectators.get(tableId);
+    const meta = set && set.get(socket.id);
+    if (!meta) throw new Error('not a spectator on this table');
+    meta.showAllCards = showAll === true;
+    const entry = store.get(tableId);
+    reply({ ok: true, snapshot: entry ? spectatorSnapshot(entry, socket.id) : null });
+    notifySpectators(tableId);
   });
 
   /**
    * Advance the hand exactly one step (one legal actor move, or start the next
-   * hand). This is the spectator's substitute for the auto-pump: while a
-   * spectator is present, auto-advance is paused and `step` is the only way
-   * the table moves forward.
+   * hand). While a spectator is present auto-advance is paused, and `step` is
+   * the only way the table moves forward.
    */
-  socket.on('step', ({ tableId }, ack) => {
-    try {
-      if (!tableId) throw new Error('tableId required');
-      const set = spectators.get(tableId);
-      const meta = set && set.get(socket.id);
-      if (!meta) throw new Error('not a spectator on this table');
-      const entry = store.get(tableId);
-      if (!entry) throw new Error('table not found');
-      const table = entry.table;
-      if (!table.inHand) {
-        table.startHand();
-      } else {
-        const next = table.nextActorId();
-        if (next) {
-          // Advance exactly one legal move. `check` is fastest when no bet is
-          // to act on; otherwise fall back to a deterministic, legal action
-          // via the (seeded) AI so step-through is always valid.
-          try {
-            table.applyAction(next, 'check', 0);
-          } catch (err) {
-            const d = decideAction(table, next, {
-              difficulty: 'easy',
-              seed: `${table.handNumber}-${table.street}`
-            });
-            table.applyAction(next, d.action, d.amount || 0);
-          }
+  on('step', ({ tableId }, reply) => {
+    if (!tableId) throw new Error('tableId required');
+    const set = spectators.get(tableId);
+    if (!set || !set.has(socket.id)) throw new Error('not a spectator on this table');
+    const entry = store.get(tableId);
+    if (!entry) throw new Error('table not found');
+    const table = entry.table;
+    if (!table.inHand) {
+      table.startHand();
+    } else {
+      const next = table.nextActorId();
+      if (next) {
+        // `check` when nothing is owed; otherwise a deterministic, legal
+        // action from the (seeded) AI so step-through is always valid.
+        try {
+          table.applyAction(next, 'check', 0);
+        } catch (err) {
+          const d = decideAction(table, next, {
+            difficulty: 'easy',
+            seed: `${table.handNumber}-${table.street}-${table.actionLog.length}`
+          });
+          table.applyAction(next, d.action, d.amount || 0);
         }
       }
-      if (typeof ack === 'function') {
-        ack({ ok: true, snapshot: spectatorSnapshot(entry, socket.id) });
-      }
-      broadcast(tableId); // also pushes the fresh spectator state via notifySpectators
-    } catch (err) {
-      if (typeof ack === 'function') ack({ ok: false, error: err.message });
     }
+    reply({ ok: true, snapshot: spectatorSnapshot(entry, socket.id) });
+    broadcast(tableId); // also pushes the fresh spectator state via notifySpectators
   });
 
   // ----------------------------------------------------------------- history
 
-  socket.on('getHistory', ({ tableId }, ack) => {
-    if (typeof ack !== 'function') return;
-    if (tableId) {
-      ack({ ok: true, hands: handHistory.filter((h) => h.tableId === tableId) });
-    } else {
-      ack({ ok: true, hands: [...handHistory] });
-    }
+  const historyFor = (tableId) =>
+    tableId ? handHistory.filter((h) => h.tableId === tableId) : [...handHistory];
+
+  on('getHistory', ({ tableId }, reply) => {
+    reply({ ok: true, hands: historyFor(tableId) });
   });
 
-  socket.on('exportHistory', ({ tableId }, ack) => {
-    if (typeof ack !== 'function') return;
-    const hands = tableId
-      ? handHistory.filter((h) => h.tableId === tableId)
-      : [...handHistory];
-    ack({ ok: true, json: serializeHandRecord(hands) });
+  on('exportHistory', ({ tableId }, reply) => {
+    reply({ ok: true, json: serializeHandRecord(historyFor(tableId)) });
   });
 
   socket.on('disconnect', () => {
@@ -817,7 +789,6 @@ if (
   !process.env.VITEST_WORKER_ID
 ) {
   server.listen(PORT, HOST, () => {
-    // eslint-disable-next-line no-console
     console.log(`[saloon] server listening on http://${HOST}:${PORT}`);
   });
 }

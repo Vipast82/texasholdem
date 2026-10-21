@@ -40,6 +40,18 @@ const HISTORY_DEFAULTS = {
 
 const HISTORY_CAP = 200;
 
+/** Everything tied to the table you are sitting at (reset on leave/disconnect). */
+const TABLE_STATE = () => ({
+  tableId: null,
+  playerId: null,
+  snapshot: null,
+  chat: [],
+  botActions: {},
+  spectator: { ...SPECTATOR_DEFAULTS },
+  history: { ...HISTORY_DEFAULTS },
+  emotes: {}
+});
+
 const initialState = {
   connected: false,
   tableId: null,
@@ -144,6 +156,7 @@ export const useGameStore = create((set, get) => ({
           get().recordHandEnd(payload); // autosave profile/stats (best-effort)
         }
       } else if (event === 'handStarted') {
+        set({ botActions: {} }); // last hand's "Called" / "Raised" labels are stale now
         sfxService.play('shuffle');
       } else if (event === 'holeDealt') {
         sfxService.play('deal');
@@ -185,7 +198,8 @@ export const useGameStore = create((set, get) => ({
     set({ _tutorialEventCb: fn || null });
   },
   _onConnect: () => set({ connected: true }),
-  _onDisconnect: () => set({ connected: false, snapshot: null, tableId: null, playerId: null }),
+  // The server drops our seat when the socket goes away, so forget the table.
+  _onDisconnect: () => set({ connected: false, ...TABLE_STATE() }),
   _onError: (err) => set({ error: err.message || 'Connection error' }),
 
   connect() {
@@ -221,7 +235,7 @@ export const useGameStore = create((set, get) => ({
       set({ error: res.error });
       return false;
     }
-    set({ tableId, name, playerId: res.playerId, error: null });
+    set({ tableId: res.tableId || tableId, name, playerId: res.playerId, error: null });
     return true;
   },
 
@@ -240,6 +254,13 @@ export const useGameStore = create((set, get) => ({
     const tableId = get().tableId;
     if (!tableId) return { ok: false, error: 'join a table first' };
     const res = await emitAck('addBot', { tableId, botDifficulty });
+    if (!res.ok) set({ error: res.error });
+    return res;
+  },
+
+  /** Busted? Buy back in for a fresh starting stack. */
+  async rebuy() {
+    const res = await emitAck('rebuy');
     if (!res.ok) set({ error: res.error });
     return res;
   },
@@ -551,7 +572,8 @@ export const useGameStore = create((set, get) => ({
 
   async leave() {
     await emitAck('leaveTable');
-    set({ ...initialState, connected: socket.connected, _tutorialEventCb: null });
+    // Keep the profile, avatar, sound and language — only the table goes away.
+    set({ ...TABLE_STATE(), error: null });
   },
 
   setError(error) {

@@ -1,8 +1,9 @@
 import { defineConfig } from 'vitest/config';
-import react from '@vitejs/plugin-react';
 
+// Vite 8 compiles JSX natively (automatic runtime), so no React plugin is needed
+// for tests. The frontend's own vite.config.js still uses @vitejs/plugin-react
+// for dev-server Fast Refresh.
 export default defineConfig({
-  plugins: [react()],
   test: {
     include: [
       'shared/tests/**/*.test.js',

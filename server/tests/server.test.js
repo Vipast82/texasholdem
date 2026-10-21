@@ -344,4 +344,40 @@ describe('server avatar sharing (Sprint 7)', () => {
     expect(res.ok).toBe(false);
     stray.close();
   });
+  it('leaveTable replies even when the client sends an empty payload', async () => {
+    const a = await join(ioUrl, `leave-${Date.now()}`, 'Alice');
+    const res = await ack(a.socket, 'leaveTable');
+    expect(res).toEqual({ ok: true });
+    a.socket.close();
+  });
+
+  it('a malformed message is rejected instead of crashing the server', async () => {
+    const stray = Client(ioUrl, { transports: ['websocket'] });
+    await new Promise((r) => stray.on('connect', r));
+    stray.emit('playerAction'); // no payload, no callback
+    stray.emit('chatMessage', null);
+    const res = await new Promise((resolve) => stray.emit('playerAction', resolve));
+    expect(res.ok).toBe(false);
+    // The server is still alive and answering.
+    const tables = await new Promise((resolve) => stray.emit('listTables', resolve));
+    expect(Array.isArray(tables)).toBe(true);
+    stray.close();
+  });
+
+  it('hand records never reveal hole cards that were not shown down', async () => {
+    const tableId = `priv-${Date.now()}`;
+    const a = await join(ioUrl, tableId, 'Alice');
+    const b = await join(ioUrl, tableId, 'Bob');
+    const records = [];
+    b.socket.on('handRecord', (r) => records.push(r));
+    const start = await ack(a.socket, 'startHand');
+    const first = start.snapshot.nextActorId;
+    const actor = first === a.playerId ? a : b;
+    await ack(actor.socket, 'playerAction', { action: 'fold' });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(records).toHaveLength(1);
+    for (const p of records[0].players) expect(p.holeCards).toBeNull();
+    a.socket.close();
+    b.socket.close();
+  });
 });

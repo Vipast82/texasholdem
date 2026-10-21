@@ -1,410 +1,297 @@
 import { useEffect, useRef, useState } from 'react';
+import { categoryName } from '@saloon/shared';
 import { parseDisplayCard } from '../cardUtils.js';
 import { useGameStore } from '../store.js';
-import { t } from '../i18n.js';
+import { t, getLocale } from '../i18n.js';
 import HudOdds from './HudOdds.jsx';
 import DealerButton from './DealerButton.jsx';
 import StickFigure from './StickFigure.jsx';
-import EmoteBar from './EmoteBar.jsx';
-import ChipStack from './ChipStack.jsx';
 import BetChips from './BetChips.jsx';
 
+const DENOMS = [1, 5, 25, 100, 500];
+
 /**
- * Sprint 5 art pass — "is this card newly appearing?" helper.
- *
- * A CSS animation only plays when the element first mounts with that class.
- * React re-renders on every snapshot, so we track which (card, street) pairs
- * have already been seen and apply the animation class for one commit only,
- * removing it on the next render. This gives us:
- *   - deal-in animation when hole cards first appear
- *   - flip-in animation when community cards are revealed face-up
- *   - table shake when a new hand starts
- *   - pot glow on hand start
- * Without replaying on every re-render (bot actions, chip updates, etc.).
+ * Turn `on` for `durationMs` whenever `dep` changes (never on first mount, so
+ * joining a table mid-hand does not fake a shuffle). Drives one-shot CSS
+ * animations like the table wiggle on a new hand.
  */
 function useTransientFlag(dep, durationMs = 800) {
   const [on, setOn] = useState(false);
-  const first = useRef(true);
-  const prev = useRef(dep);
+  const firstRef = useRef(true);
+  const prevRef = useRef(dep);
   useEffect(() => {
-    if (first.current) {
-      first.current = false;
-      prev.current = dep;
+    if (firstRef.current) {
+      firstRef.current = false;
+      prevRef.current = dep;
       return undefined;
     }
-    if (dep === prev.current) return undefined;
-    prev.current = dep;
-    setOn(true);
-    const timer = setTimeout(() => setOn(false), durationMs);
-    return () => clearTimeout(timer);
+    if (dep === prevRef.current) return undefined;
+    prevRef.current = dep;
+    const start = setTimeout(() => setOn(true), 0);
+    const stop = setTimeout(() => setOn(false), durationMs);
+    return () => {
+      clearTimeout(start);
+      clearTimeout(stop);
+    };
   }, [dep, durationMs]);
   return on;
 }
 
-function streetLabel(street) {
-  const key = `street.${street}`;
-  const out = t(key);
-  return out === key ? street : out;
-}
-
 /**
- * Runout (all-in / everyone matched) is a single server snapshot: the turn AND
- * river hit the board at once and the hand ends. Instead of showing both
- * instantly (and then the screen clearing), we reveal them on a slow,
- * cinematic beat. Delays are keyed by the community-card index (0-based) so the
- * flop (0-2) lands first, then the turn (~1.3 s), then the river (~2.4 s) —
- * giving a clear "flop … turn … river" cadence even though the server dealt
- * them in one move.
+ * All-in runouts deal the rest of the board in one server update. We reveal
+ * those cards on a slow beat (turn, then river) instead of all at once. Delays
+ * are in seconds, indexed by board position.
  */
 const SLOW_REVEAL_DELAYS = [0, 0, 0, 1.3, 2.4];
-/** Total time (ms) before the winner celebration plays on a slow runout
- *  (river lands at ~2.4s + its ~1s flip, so celebrate just after it settles). */
-const RUNOUT_CELEBRATE_MS = 3200;
 
-function CommunityCard({ card, faceUp, slowReveal, index }) {
-  if (!faceUp) {
-    // Card back — deal-in (flies in from the deck) when a new card appears.
-    return <div className="card card--back card--deal" />;
-  }
+function revealDelay(index, from) {
+  const offset = from >= 3 ? SLOW_REVEAL_DELAYS[from] - 0.4 : 0;
+  return Math.max(0, SLOW_REVEAL_DELAYS[index] - offset);
+}
+
+function runoutSettleMs(from) {
+  return Math.round((revealDelay(4, from) + 0.9) * 1000);
+}
+
+export function Card({ card, size = 'md', className = '', style }) {
   const { rank, suit, isRed } = parseDisplayCard(card);
-  // Face-up — 3D flip-in when the street reveals.
-  // `slowReveal` gives the runout (all-in → turn + river) a cinematic stagger:
-  // turn appears ~1.3 s after the flop, river ~2.5 s, so the player can watch
-  // each card land before the showdown is decided.
-  const cls = slowReveal ? 'card--flip card--slow-reveal' : 'card--flip';
   return (
-    <div className={`card ${isRed ? 'card--red' : 'card--black'} ${cls}`} style={slowReveal ? { animationDelay: `${SLOW_REVEAL_DELAYS[index] || 0}s` } : undefined}>
+    <div className={`card card--${size} ${isRed ? 'card--red' : 'card--black'} ${className}`} style={style}>
       <span className="card__rank">{rank}</span>
       <span className="card__suit">{suit}</span>
     </div>
   );
 }
 
-function HoleCards({ cards }) {
-  if (!cards || cards.length === 0) {
-    return <div className="holecard holecard--hidden" />;
-  }
-  return (
-    <div className="holecards">
-      {cards.map((c, i) => {
-        const { rank, suit, isRed } = parseDisplayCard(c);
-        return (
-          <div
-            key={c}
-            className={`card card--small ${isRed ? 'card--red' : 'card--black'} card--deal`}
-            style={{ animationDelay: `${i * 0.12}s` }}
-          >
-            <span className="card__rank">{rank}</span>
-            <span className="card__suit">{suit}</span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function statusLabel(player, street) {
-  if (player.hasFolded) return t('seat.folded');
-  if (player.isAllIn) return t('seat.allin');
-  const posted = (player.contributions && player.contributions[street]) || 0;
-  return posted > 0 ? t('seat.posted', { n: posted }) : '—';
+function CardBack({ size = 'sm', className = '' }) {
+  return <div className={`card card--${size} card--back ${className}`} aria-hidden="true" />;
 }
 
 /**
- * layoutSeats — compute a position (in stage %) for every seat so players are
- * arranged AROUND the oval rim, the way a real poker table reads:
- *   - "you" anchors to bottom-centre (in front of the table);
- *   - opponents spread evenly across the upper arc (upper-left → top → upper-right).
- *
- * Pure + deterministic (no randomness), so React's double-render can't desync.
- * Returns an array parallel to `players` (same order/length) of `{ x, y }`.
+ * Seat positions (in % of the table box) for every player, in seat order,
+ * going clockwise around the rail. You always sit at the bottom centre; a
+ * spectator sees the lowest seat there instead.
  */
-function layoutSeats(players, playerId) {
-  const RX = 34; // horizontal radius (% of the stage)
-  const RY = 33; // vertical radius
-  const toRad = (d) => (d * Math.PI) / 180;
-  const meIndex = players.findIndex((p) => p.id === playerId);
-  const opponents = players.map((p, i) => i).filter((i) => i !== meIndex);
-  const n = opponents.length;
-  const positions = new Array(players.length).fill(null);
-  opponents.forEach((playerIdx, idx) => {
-    let a;
-    if (n === 1) a = 90; // top-centre
-    else {
-      // spread across the upper arc, 15°..165°, so the two edge seats sit at
-      // the upper sides (not dead-on the horizontal extremes).
-      a = 15 + (150 * idx) / (n - 1);
-    }
-    const x = 50 + RX * Math.cos(toRad(a));
-    const y = 50 - RY * Math.sin(toRad(a));
-    positions[playerIdx] = { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 };
+export function layoutSeats(players, playerId) {
+  const RX = 47;
+  const RY = 46;
+  const n = players.length;
+  const meIndex = Math.max(
+    0,
+    players.findIndex((p) => p.id === playerId)
+  );
+  return players.map((_, i) => {
+    const step = (i - meIndex + n) % n;
+    const angle = (2 * Math.PI * step) / n;
+    const x = 50 - RX * Math.sin(angle);
+    const y = 50 + RY * Math.cos(angle);
+    return { x, y };
   });
-  if (meIndex >= 0) positions[meIndex] = { x: 50, y: 86 };
-  return positions;
 }
 
-/**
- * PotStack — the centre pot rendered as a 3D "tower" of chips on the felt, so
- * the pot reads as a physical stack (taller for bigger pots) instead of just a
- * number. Decorative (the value is already announced in the table topline), so
- * it is aria-hidden. Renders nothing for an empty pot.
- */
-function PotStack({ pot }) {
-  if (!pot || pot <= 0) return null;
-  // ~3 chips for tiny pots, up to 9 for big ones (log scale keeps it tidy).
-  const n = Math.max(3, Math.min(9, Math.round(3 + Math.log10(pot + 1) * 1.1)));
-  return (
-    <div className="potstack" aria-hidden="true">
-      {Array.from({ length: n }).map((_, i) => (
-        <span key={i} className="potstack__chip" style={{ zIndex: n - i }} />
-      ))}
-    </div>
-  );
+function statusText(player, snapshot, botAction) {
+  if (player.chips === 0 && !player.isAllIn && player.status !== 'in-hand') return t('seat.busted');
+  if (player.hasFolded && snapshot.inHand) return t('seat.folded');
+  if (player.isAllIn && snapshot.inHand) return t('seat.allin');
+  if (player.isBot && botAction && snapshot.inHand) return t(`action.${botAction.action}`);
+  return null;
 }
 
-/**
- * Sprint 6 — derive a stick-figure pose from the player's live state.
- *   winning > allin > folded > acting > idle
- */
-function poseFor(player, isNextActor, isWinner) {
-  if (isWinner) return 'winning';
-  if (player.isAllIn) return 'allin';
-  if (player.hasFolded) return 'folded';
-  if (isNextActor) return 'acting';
-  return 'idle';
-}
-
-function PlayerBadge({ player, street, isYou, isDealer, isNextActor, isWinner, botAction, snapshot, emote, canRemoveBot, onRemoveBot, pos }) {
-  const pose = poseFor(player, isNextActor, isWinner);
+function Seat({ player, snapshot, pos, isYou, isDealer, isActing, isWinner, botAction, emote, onRemoveBot }) {
+  const inHand = player.status === 'in-hand';
+  const folded = player.hasFolded && snapshot.inHand;
+  const pose = isWinner
+    ? 'winning'
+    : player.isAllIn && snapshot.inHand
+      ? 'allin'
+      : folded
+        ? 'folded'
+        : isActing
+          ? 'acting'
+          : 'idle';
+  const status = statusText(player, snapshot, botAction);
+  const showCards = Array.isArray(player.holeCards) && player.holeCards.length === 2;
+  // Keep the last hand's cards on screen until the next deal.
+  const dealtIn = inHand || (!snapshot.inHand && snapshot.street === 'ended' && showCards);
 
   return (
     <div
       className={[
         'seat',
-        player.isBot && 'seat--bot',
         isYou && 'seat--you',
-        isNextActor && 'seat--acting',
-        player.hasFolded && 'seat--folded',
-        player.isAllIn && 'seat--allin',
-        isWinner && 'seat--winning'
+        isActing && 'seat--acting',
+        folded && 'seat--folded',
+        isWinner && 'seat--winner'
       ]
         .filter(Boolean)
         .join(' ')}
-      // Rim placement (see layoutSeats): anchor the seat card on its (x%, y%)
-      // point around the oval. CSS `.seat` handles the translate(-50%,-50%).
-      style={pos ? { left: `${pos.x}%`, top: `${pos.y}%` } : undefined}
+      style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
     >
       <div className="seat__figure">
         <StickFigure player={player} pose={pose} emote={emote} isMe={isYou} />
         {isDealer && <DealerButton active seat={player.name} />}
       </div>
 
-      {/* Sprint 7 — bet chips: the amount posted THIS street as a growing,
-          color-coded chip pile so the bet size is visible at a glance. */}
-      {(player.contributions && (player.contributions[street] || 0) > 0) && !player.hasFolded && (
-        <div className="seat__betchips">
-          <BetChips amount={player.contributions[street]} denominations={snapshot.chipDenominations || [1, 5, 25, 100, 500]} />
-        </div>
-      )}
-
-      <span className="seat__name">
-        {player.name}
-        {isYou && t('seat.you')}
-        {player.isBot && (
-          <span
-            className="badge badge--bot"
-            title={t('seat.botTitle', { difficulty: (player.bot && player.bot.difficulty) || 'normal' })}
-          >
-            🤖
-          </span>
-        )}
-      </span>
-      {player.isBot && canRemoveBot && (
-        <button
-          type="button"
-          className="seat__removebot"
-          aria-label={t('seat.removeBot', { name: player.name })}
-          title={t('seat.removeBot', { name: player.name })}
-          onClick={() => onRemoveBot(player.id)}
-        >
-          ✕
-        </button>
-      )}
-
-      <HoleCards cards={player.holeCards} />
-      <HudOdds snapshot={snapshot} playerId={player.id} />
-      <div className="seat__stats">
-        <ChipStack
-          chips={player.chips}
-          posted={(player.contributions && player.contributions[street]) || 0}
-          denominations={snapshot.chipDenominations || [1, 5, 25, 100, 500]}
-        />
-        <span className="seat__status">{statusLabel(player, street)}</span>
-      </div>
-      {player.isBot && botAction && (
-        <div className="seat__botnote" title={botAction.reason}>
-          <strong>{botAction.action}</strong>
-          {typeof botAction.confidence === 'number' && (
-            <span className="seat__botconf">{Math.round(botAction.confidence * 100)}%</span>
+      <div className="seat__plate">
+        <span className="seat__name">
+          <span className="seat__nametext">{player.name}</span>
+          {player.isBot && (
+            <span
+              className="seat__bot"
+              title={t('seat.botTitle', { difficulty: (player.bot && player.bot.difficulty) || 'normal' })}
+            >
+              {t('seat.cpu')}
+            </span>
           )}
+        </span>
+        <span className="seat__stack">{player.chips.toLocaleString()}</span>
+        {status && <span className="seat__status">{status}</span>}
+        {onRemoveBot && (
+          <button
+            type="button"
+            className="seat__remove"
+            aria-label={t('seat.removeBot', { name: player.name })}
+            title={t('seat.removeBot', { name: player.name })}
+            onClick={() => onRemoveBot(player.id)}
+          >
+            ×
+          </button>
+        )}
+      </div>
+
+      {dealtIn && (
+        <div className={`seat__cards${isYou ? ' seat__cards--mine' : ''}`}>
+          {showCards
+            ? player.holeCards.map((c, i) => (
+                <Card
+                  key={c}
+                  card={c}
+                  size={isYou ? 'md' : 'sm'}
+                  className="card--deal"
+                  style={{ animationDelay: `${i * 0.12}s` }}
+                />
+              ))
+            : [0, 1].map((i) => <CardBack key={i} className="card--deal" />)}
         </div>
       )}
+      <HudOdds snapshot={snapshot} playerId={player.id} />
     </div>
   );
+}
+
+/** "Nina wins 3,000 with three of a kind" — the result of the hand just played. */
+function resultText(snapshot) {
+  const payouts = snapshot.payouts || {};
+  const winners = Object.keys(payouts).filter((id) => payouts[id] > 0);
+  if (!winners.length) return null;
+  const nameOf = (id) => (snapshot.players.find((p) => p.id === id) || {}).name || '?';
+  const total = winners.reduce((s, id) => s + payouts[id], 0);
+  const names = winners.map(nameOf).join(' & ');
+  const ranked = snapshot.lastShowdown && snapshot.lastShowdown.ranked;
+  if (ranked && ranked.category != null) {
+    return t(winners.length > 1 ? 'table.splitWith' : 'table.winsWith', {
+      name: names,
+      n: total.toLocaleString(),
+      hand: categoryName(ranked.category, getLocale()).toLowerCase()
+    });
+  }
+  return t('table.wins', { name: names, n: total.toLocaleString() });
 }
 
 export default function Table({ snapshot }) {
   const playerId = useGameStore((s) => s.playerId);
   const botActions = useGameStore((s) => s.botActions);
-  const hud = useGameStore((s) => s.hud);
-  const toggleHud = useGameStore((s) => s.toggleHud);
   const spectator = useGameStore((s) => s.spectator);
   const emotes = useGameStore((s) => s.emotes);
   const removeBot = useGameStore((s) => s.removeBot);
-  const sortedPlayers = [...snapshot.players].sort((a, b) => a.seat - b.seat);
+
+  const players = [...snapshot.players].sort((a, b) => a.seat - b.seat);
   const community = snapshot.community || [];
-  const communitySlots = 5;
   const handNum = snapshot.handNumber || 0;
+  const ended = !snapshot.inHand && snapshot.street === 'ended';
 
-  // ---------------------------------------------------------------------------
-  // Showdown pacing (all-in / runout + "hold after river")
-  //
-  // Two things were jarring with the raw snapshots:
-  //   1. An all-in runout deals the turn AND river in ONE 'ended' snapshot, so
-  //      the board flashed all at once.
-  //   2. On 'ended' the old code set faceUp=false, so the final board flipped
-  //      to backs and the screen "cleared" the instant the hand resolved.
-  //
-  // We fix both purely here (engine/server untouched):
-  //   * keep the final board face-up and HOLD it until the dealer starts the
-  //     next hand (faceUp is true for a live street OR an ended hand with cards);
-  //   * for a runout, reveal the 5 cards on a slow beat and only fire the
-  //     winner celebration AFTER the river lands.
-  // ---------------------------------------------------------------------------
-  const isEndedNow =
-    !snapshot.inHand && (snapshot.street === 'ended' || snapshot.street === 'idle');
-  const liveBoard = ['flop', 'turn', 'river'].includes(snapshot.street);
-  const faceUp = liveBoard || (isEndedNow && community.length > 0);
-
-  // Track, per hand, whether we ever SAW a live 'river' street. A hand that
-  // jumps straight to an ended 5-card board without one is an all-in runout.
-  // (Reading + latching a ref in render is safe here: every mutation is
-  // idempotent, so React's double-invoke / re-render cannot desync it.)
-  const paceRef = useRef({ hand: -1, sawRiver: false, runout: false });
-  const pace = paceRef.current;
-  if (handNum !== pace.hand) {
-    pace.hand = handNum;
-    pace.sawRiver = false;
-    pace.runout = false;
-  }
-  if (liveBoard && snapshot.street === 'river') pace.sawRiver = true;
-  if (isEndedNow && community.length === 5 && !pace.sawRiver) pace.runout = true;
-  const isRunoutHand = pace.runout;
-
-  // Winner celebration: instant for a normal hand; on a runout, wait for the
-  // slow river reveal before the winner pops / the glow plays. `celebrateDelayed`
-  // starts false so the FIRST runout render does not flash the winner early.
-  const [celebrateDelayed, setCelebrateDelayed] = useState(false);
+  // All-in runout pacing: only the cards dealt by the runout get the slow
+  // reveal, and the winner is celebrated once the river has landed.
+  const runoutFrom = typeof snapshot.runoutFrom === 'number' ? snapshot.runoutFrom : null;
+  const isRunout = ended && runoutFrom !== null && community.length === 5;
+  const [celebratedHand, setCelebratedHand] = useState(null);
   useEffect(() => {
-    if (!isRunoutHand) {
-      setCelebrateDelayed(true);
-      return undefined;
-    }
-    setCelebrateDelayed(false);
-    const t = setTimeout(() => setCelebrateDelayed(true), RUNOUT_CELEBRATE_MS);
-    return () => clearTimeout(t);
-  }, [isRunoutHand, handNum]);
-  const winnerVisible = isRunoutHand ? celebrateDelayed : true;
+    if (!isRunout) return undefined;
+    const timer = setTimeout(() => setCelebratedHand(handNum), runoutSettleMs(runoutFrom));
+    return () => clearTimeout(timer);
+  }, [isRunout, handNum, runoutFrom]);
+  const settled = !isRunout || celebratedHand === handNum;
 
-  // Sprint 6 — resolve this hand's winner ids (for the winning pose), gated by
-  // the celebration timing so a runout winner pops only after the river lands.
-  const lastWinners = (snapshot.lastShowdown && snapshot.lastShowdown.winnerIds) || [];
-  const isWinner = (p) => winnerVisible && lastWinners.includes(p.id);
+  const payouts = snapshot.payouts || {};
+  const isWinner = (p) => ended && settled && payouts[p.id] > 0;
+  const result = ended && settled ? resultText(snapshot) : null;
 
-  // The runout's slow, per-card reveal (flop → turn → river) with staggered
-  // delays (SLOW_REVEAL_DELAYS). Only active for an ended 5-card board.
-  const slowReveal = isRunoutHand && isEndedNow && community.length === 5;
-
-  // Sprint 5 art pass: the table wiggles once and the pot glows when a new
-  // hand starts (handNumber changes). useTransientFlag is inert on first
-  // mount, so joining an in-progress table does NOT fake a shuffle.
   const shuffling = useTransientFlag(handNum, 700);
-  const potGlow = useTransientFlag(`${handNum}-pot`, 1300);
+  const positions = layoutSeats(players, playerId);
+  const canRemoveBots = !snapshot.inHand && !spectator.active;
 
-  const tableClass = ['table', 'table--saloon', shuffling && 'table--shuffling'].filter(Boolean).join(' ');
-
-  // Seat positions around the oval rim (pure; see layoutSeats).
-  const seatPositions = layoutSeats(sortedPlayers, playerId);
+  let message = ' ';
+  if (result) message = result;
+  else if (snapshot.inHand) message = t(`street.${snapshot.street}`);
+  else if (handNum === 0) message = t('table.firstHand');
 
   return (
-    <div className={tableClass}>
-      <div className="table__topline">
-        <span className="table__street">{streetLabel(snapshot.street)}</span>
-        <label className="table__hudtoggle" title={t('hud.tip', { n: hud.iterations })}>
-          <input type="checkbox" checked={hud.enabled} onChange={toggleHud} />
-          <span>{t('hud.label')}</span>
-        </label>
-        {spectator.active && <span className="table__spectatorbadge">{t('spectator.badge')}</span>}
-        <span className={`table__pot${potGlow ? ' table__pot--glow' : ''}`}>
-          {t('table.pot', { n: snapshot.pot })}
-        </span>
-      </div>
+    <div className="table">
+      <div className={`table__oval${shuffling ? ' table__oval--shuffle' : ''}`}>
+        <div className="table__felt" aria-hidden="true" />
 
-      <div className="table__saloonbody">
-        {/* The 3D stage: a tilted oval felt with the pot + cards in the centre
-            and the players seated around its rim. */}
-        <div className="table__stage">
-          {/* Center of the oval: 3D-raised felt + pot tower + community cards */}
-          <div className="table__felt">
-            <div className="table__community">
-              <PotStack pot={snapshot.pot} />
-              <div className="table__cardsrow">
-                {Array.from({ length: communitySlots }).map((_, i) => (
-                  <CommunityCard
-                    key={community[i] ? `${community[i]}-${snapshot.street}` : `empty-${i}`}
-                    card={community[i]}
-                    faceUp={faceUp && i < community.length}
-                    slowReveal={slowReveal}
-                    index={i}
-                  />
-                ))}
-              </div>
+        <div className="table__center">
+          <div className={`table__pot${snapshot.pot > 0 ? '' : ' table__pot--empty'}`} aria-live="polite">
+            {snapshot.pot > 0 ? t('table.pot', { n: snapshot.pot.toLocaleString() }) : ' '}
+          </div>
+          <div className="table__board" role="group" aria-label={t('table.board')}>
+            {Array.from({ length: 5 }).map((_, i) => {
+              const card = community[i];
+              if (!card)
+                return <div key={`slot-${i}`} className="card card--md card--slot" aria-hidden="true" />;
+              const slow = isRunout && i >= runoutFrom;
+              return (
+                <Card
+                  key={card}
+                  card={card}
+                  className={slow ? 'card--flip card--slow' : 'card--flip'}
+                  style={slow ? { animationDelay: `${revealDelay(i, runoutFrom)}s` } : undefined}
+                />
+              );
+            })}
+          </div>
+          <div className={`table__message${result ? ' table__message--result' : ''}`} role="status">
+            {message}
+          </div>
+        </div>
+
+        {players.map((p, i) => {
+          const bet = (p.contributions && p.contributions[snapshot.street]) || 0;
+          if (!snapshot.inHand || bet <= 0 || p.hasFolded) return null;
+          const pos = positions[i];
+          return (
+            <div key={`bet-${p.id}`} className="table__bet" style={{ '--sx': pos.x, '--sy': pos.y }}>
+              <BetChips amount={bet} denominations={snapshot.chipDenominations || DENOMS} />
             </div>
-          </div>
+          );
+        })}
 
-          {/* Players arranged around the oval table */}
-          <div className="table__players">
-            {sortedPlayers.map((p, i) => (
-              <PlayerBadge
-                key={p.id}
-                player={p}
-                street={snapshot.street}
-                isYou={p.id === playerId}
-                isDealer={snapshot.dealerSeat === p.seat}
-                isNextActor={snapshot.nextActorId === p.id}
-                isWinner={isWinner(p)}
-                botAction={botActions[p.id] || null}
-                snapshot={snapshot}
-                emote={emotes[p.id] ? emotes[p.id].glyph : null}
-                canRemoveBot={!snapshot.inHand && !spectator.active}
-                onRemoveBot={(botId) => { removeBot(botId); }}
-                pos={seatPositions[i] || null}
-              />
-            ))}
-          </div>
-        </div>
+        {players.map((p, i) => (
+          <Seat
+            key={p.id}
+            player={p}
+            snapshot={snapshot}
+            pos={positions[i]}
+            isYou={p.id === playerId}
+            isDealer={handNum > 0 && snapshot.dealerSeat === p.seat}
+            isActing={snapshot.inHand && snapshot.nextActorId === p.id}
+            isWinner={isWinner(p)}
+            botAction={botActions[p.id] || null}
+            emote={emotes[p.id] ? emotes[p.id].glyph : null}
+            onRemoveBot={p.isBot && canRemoveBots ? removeBot : null}
+          />
+        ))}
       </div>
-
-      {/* Emote bar lives below the player's seat, anchored to the local player */}
-      {playerId && <EmoteBar playerId={playerId} />}
-
-      {snapshot.lastShowdown && (
-        <div className="table__showdown">
-          <strong>{t('table.showdown')}</strong> {snapshot.lastShowdown.ranked && snapshot.lastShowdown.ranked.cards
-            ? snapshot.lastShowdown.ranked.cards.join(' ')
-            : '—'}
-        </div>
-      )}
     </div>
   );
 }

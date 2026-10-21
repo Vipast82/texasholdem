@@ -168,9 +168,10 @@ describe('GameTable - mid-hand removal (orphaned hand)', () => {
     const game = twoPlayerTable();
     game.startHand();
     expect(game.inHand).toBe(true);
-    // After blinds: a=1990 (SB, contributed 10), b=1980 (BB, contributed 20), pot=30.
-    expect(game.players.find((p) => p.id === 'a').chips).toBe(1990);
-    expect(game.players.find((p) => p.id === 'b').chips).toBe(1980);
+    // Heads-up the button (b, seat 1 on the first hand) posts the small blind:
+    // b=1990 (SB, contributed 10), a=1980 (BB, contributed 20), pot=30.
+    expect(game.players.find((p) => p.id === 'b').chips).toBe(1990);
+    expect(game.players.find((p) => p.id === 'a').chips).toBe(1980);
     expect(game.pot).toBe(30);
     // Remove one player mid-hand. Only one active remains -> hand must end.
     game.removePlayer('a');
@@ -179,23 +180,23 @@ describe('GameTable - mid-hand removal (orphaned hand)', () => {
     expect(game.pot).toBe(0);
     // Sole remaining player gets the ENTIRE pot refunded (chips preserved).
     const b = game.playerById('b');
-    expect(b.chips).toBe(1980 + 30); // full stack + pot back
+    expect(b.chips).toBe(1990 + 30); // stack + whole pot
   });
 
   it('resolves a hand mid-flop when one of two players leaves', () => {
     const game = twoPlayerTable();
     game.startHand();
-    // 2-player preflop: SB (a) acts first. SB calls the BB.
+    // 2-player preflop: the button/SB (b) acts first and calls the BB.
     const first = game.nextActorId();
     game.applyAction(first, 'call', 20);
-    // Now BB (b) acts. BB checks (toCall is 0).
+    // Now the BB (a) checks (toCall is 0).
     const second = game.nextActorId();
     expect(second).not.toBeNull();
     game.applyAction(second, 'check');
     // Both have acted on preflop -> street advances to flop.
     expect(game.inHand).toBe(true);
     expect(game.street).toBe('flop');
-    // Contributions at this point: a = 10 (SB) + 10 (call) = 20, b = 20 (BB).
+    // Contributions at this point: b = 10 (SB) + 10 (call) = 20, a = 20 (BB).
     // Pot = 40. Remove a player mid-flop.
     game.removePlayer('a');
     expect(game.inHand).toBe(false);

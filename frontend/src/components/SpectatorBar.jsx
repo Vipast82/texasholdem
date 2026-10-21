@@ -38,7 +38,7 @@ export default function SpectatorBar() {
         <span>{t('spectator.showAll')}</span>
       </label>
       <button
-        className="btn btn--action"
+        className="btn btn--primary"
         onClick={onStep}
         disabled={stepping}
         title={t('spectator.stepTip')}

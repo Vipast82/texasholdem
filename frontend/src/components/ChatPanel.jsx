@@ -6,34 +6,38 @@ export default function ChatPanel() {
   const chat = useGameStore((s) => s.chat);
   const sendChat = useGameStore((s) => s.sendChat);
   const [text, setText] = useState('');
-  const endRef = useRef(null);
+  const logRef = useRef(null);
 
+  // Keep the newest message in view (scroll the log, not the whole page).
   useEffect(() => {
-    if (endRef.current && typeof endRef.current.scrollIntoView === 'function') {
-      endRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
+    const log = logRef.current;
+    if (log) log.scrollTop = log.scrollHeight;
   }, [chat]);
 
   const submit = (e) => {
     e.preventDefault();
-    const t = text.trim();
-    if (!t) return;
-    sendChat(t);
+    const msg = text.trim();
+    if (!msg) return;
+    sendChat(msg);
     setText('');
   };
 
   return (
     <div className="chat">
-      <h2 className="chat__title">{t('chat.title')}</h2>
-      <div className="chat__log" role="log" aria-live="polite" aria-relevant="additions">
-        {chat.length === 0 && <p className="chat__empty">{t('chat.empty')}</p>}
-        {chat.map((m, i) => (
-          <div key={i} className="chat__msg">
-            <span className="chat__from">{m.from}</span>
-            <span className="chat__text">{m.text}</span>
-          </div>
+      <div
+        className="chat__log"
+        ref={logRef}
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions"
+        aria-label={t('chat.title')}
+      >
+        {chat.length === 0 && <p className="empty">{t('chat.empty')}</p>}
+        {chat.map((m) => (
+          <p key={`${m.ts}-${m.from}`} className="chat__msg">
+            <span className="chat__from">{m.from}</span> {m.text}
+          </p>
         ))}
-        <div ref={endRef} />
       </div>
       <form className="chat__form" onSubmit={submit}>
         <input
@@ -43,7 +47,7 @@ export default function ChatPanel() {
           placeholder={t('chat.placeholder')}
           maxLength={400}
         />
-        <button className="btn btn--primary" type="submit">
+        <button className="btn btn--primary" type="submit" disabled={!text.trim()}>
           {t('chat.send')}
         </button>
       </form>

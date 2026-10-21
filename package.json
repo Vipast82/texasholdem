@@ -19,13 +19,16 @@
     "dev:client": "npm run dev -w frontend"
   },
   "devDependencies": {
-    "@eslint/js": "^8.57.0",
-    "@types/eslint": "^8.56.10",
-    "eslint": "^8.57.0",
-    "eslint-config-prettier": "^9.1.0",
-    "eslint-plugin-react": "^7.34.29",
-    "eslint-plugin-react-hooks": "^4.6.2",
-    "prettier": "^3.3.3",
-    "vitest": "^1.6.0"
+    "@eslint-react/eslint-plugin": "^5.28.4",
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.13.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.13.0",
+    "prettier": "^3.9.10",
+    "vitest": "^5.0.5"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   }
 }

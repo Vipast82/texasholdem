@@ -37,7 +37,12 @@ function winningHandOf(record) {
   }
   if (Array.isArray(record.winnerIds) && Array.isArray(record.players)) {
     const winner = record.players.find((p) => record.winnerIds.includes(p.id) && p.bestHand);
-    if (winner && winner.bestHand && Array.isArray(winner.bestHand.cards) && winner.bestHand.cards.length >= 5) {
+    if (
+      winner &&
+      winner.bestHand &&
+      Array.isArray(winner.bestHand.cards) &&
+      winner.bestHand.cards.length >= 5
+    ) {
       return {
         cards: winner.bestHand.cards.slice(0, 5),
         category: winner.bestHand.category != null ? winner.bestHand.category : null
@@ -53,19 +58,23 @@ function winningHandOf(record) {
  * auto-persist toggle. Records arrive two ways: the live `handRecord` broadcast
  * and an explicit `loadHistory` on mount (for a fresh page load).
  */
+/** Total chips the winners took from the pot. */
+function amountWon(record) {
+  const payouts = record.payouts || {};
+  return Object.values(payouts).reduce((sum, n) => sum + (Number(n) || 0), 0);
+}
+
 export default function HistoryPanel() {
   const tableId = useGameStore((s) => s.tableId);
   const records = useGameStore((s) => s.history.records);
-  const autoPersist = useGameStore((s) => s.history.autoPersist);
+  const locale = useGameStore((s) => s.tutorial.locale);
   const loadHistory = useGameStore((s) => s.loadHistory);
   const exportHistory = useGameStore((s) => s.exportHistory);
-  const setAutoPersist = useGameStore((s) => s.setAutoPersist);
 
   // On first attach to a table, pull the server's stored history ring.
   useEffect(() => {
     if (tableId) loadHistory(tableId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tableId]);
+  }, [tableId, loadHistory]);
 
   const onExport = async () => {
     const json = await exportHistory(tableId);
@@ -75,61 +84,46 @@ export default function HistoryPanel() {
 
   return (
     <section className="history" aria-label={t('history.title')}>
-      <div className="history__head">
-        <h2>{t('history.title')}</h2>
-        <div className="history__tools">
-          <label className="history__toggle">
-            <input
-              type="checkbox"
-              checked={autoPersist}
-              onChange={(e) => setAutoPersist(e.target.checked)}
-            />
-            <span>{t('history.autoPersist')}</span>
-          </label>
-          <button className="btn btn--ghost" onClick={onExport} disabled={records.length === 0}>
-            {t('history.export')}
-          </button>
-        </div>
-      </div>
-
       {records.length === 0 ? (
-        <p className="history__empty">{t('history.empty')}</p>
+        <p className="empty">{t('history.empty')}</p>
       ) : (
         <ol className="history__list">
-          {records.slice(0, 30).map((rec, i) => {
+          {records.slice(0, 30).map((rec) => {
             const win = winningHandOf(rec);
-            const handName =
-              win && win.category != null ? categoryName(win.category, useGameStore.getState().tutorial.locale || 'en') : null;
+            const handName = win && win.category != null ? categoryName(win.category, locale || 'en') : null;
             return (
-              <li key={`${rec.tableId}-${rec.handNumber}-${i}`} className="history__item">
-                <div className="history__meta">
-                  <strong>#{rec.handNumber}</strong>
+              <li key={`${rec.tableId}-${rec.handNumber}-${rec.ts}`} className="history__item">
+                <div className="history__line">
+                  <span className="history__num">#{rec.handNumber}</span>
                   <span className="history__win">
-                    {t('history.winner')}: <strong>{winnerNames(rec)}</strong>
+                    {t('history.won', { name: winnerNames(rec), n: amountWon(rec).toLocaleString() })}
                   </span>
                 </div>
-                {win && (
-                  <div className="history__hand" title={handName || undefined}>
-                    <span className="history__handlabel">{t('history.winningHand')}</span>
-                    <CardRow cards={win.cards} titlePrefix={handName || ''} />
-                    {handName && <span className="history__handname">{handName}</span>}
-                  </div>
-                )}
-                {Array.isArray(rec.board) && rec.board.length > 0 && (
-                  <div className="history__board">
-                    <span className="history__boardlabel">{t('history.board')}</span>
-                    <CardRow cards={rec.board} titlePrefix="Board" />
-                  </div>
-                )}
-                <div className="history__reason">
-                  {rec.reason ? t(`history.reason.${rec.reason}`, { reason: rec.reason }) : ''}
+                <div className="history__detail">
+                  {handName || (rec.reason ? t(`history.reason.${rec.reason}`) : '')}
                 </div>
+                {win ? (
+                  <CardRow cards={win.cards} titlePrefix={handName || ''} />
+                ) : (
+                  Array.isArray(rec.board) &&
+                  rec.board.length > 0 && <CardRow cards={rec.board} titlePrefix={t('history.board')} />
+                )}
               </li>
             );
           })}
         </ol>
       )}
-      <p className="history__note">{t('history.note')}</p>
+      <div className="history__foot">
+        <p className="note">{t('history.note')}</p>
+        <button
+          type="button"
+          className="btn btn--ghost btn--sm"
+          onClick={onExport}
+          disabled={records.length === 0}
+        >
+          {t('history.export')}
+        </button>
+      </div>
     </section>
   );
 }

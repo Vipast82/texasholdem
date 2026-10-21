@@ -65,21 +65,22 @@ export default function SeatAvatar({ player, size = 44, isMe = false }) {
   const metaId = meta && typeof meta.avatarId === 'string' ? meta.avatarId : null;
   const needsRemote = !!player && !player.isBot && !!metaId && !(isMe && myAvatar && myAvatar.id === metaId);
 
-  const [remoteUrl, setRemoteUrl] = useState(() => (needsRemote && metaId ? remoteAvatarCache.get(metaId) || null : null));
+  // Cached URLs are read straight from the module cache; only a fresh fetch
+  // needs state (to re-render once it lands).
+  const [fetched, setFetched] = useState(null); // { id, url }
   useEffect(() => {
-    if (!needsRemote || !metaId) return undefined;
-    if (remoteAvatarCache.has(metaId)) {
-      setRemoteUrl(remoteAvatarCache.get(metaId) || null);
-      return undefined;
-    }
+    if (!needsRemote || !metaId || remoteAvatarCache.has(metaId)) return undefined;
     let alive = true;
     loadRemoteAvatar(metaId).then((url) => {
-      if (alive) setRemoteUrl(url || null);
+      if (alive) setFetched({ id: metaId, url: url || null });
     });
     return () => {
       alive = false;
     };
   }, [needsRemote, metaId]);
+  let remoteUrl = null;
+  if (needsRemote && remoteAvatarCache.has(metaId)) remoteUrl = remoteAvatarCache.get(metaId) || null;
+  else if (needsRemote && fetched && fetched.id === metaId) remoteUrl = fetched.url;
 
   const view = useMemo(() => {
     // Only the avatar THIS client actually has stored is addressable.

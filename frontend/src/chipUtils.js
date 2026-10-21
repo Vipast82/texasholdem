@@ -11,8 +11,10 @@
 // Canonical chip colours per denomination (stable, readable on the felt).
 export const CHIP_COLORS = {
   1: '#e9e2d0', // white
-  5: '#3f6fb0', // blue
-  25: '#2e8b57' // green
+  5: '#b8432f', // red
+  25: '#2e7d4f', // green
+  100: '#22201c', // black
+  500: '#6b3fa0' // purple
 };
 const FALLBACK_COLOR = '#c98a2e'; // gold, for any unknown denomination
 

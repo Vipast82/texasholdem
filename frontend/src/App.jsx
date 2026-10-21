@@ -1,16 +1,38 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useGameStore } from './store.js';
 import JoinScreen from './components/JoinScreen.jsx';
 import Table from './components/Table.jsx';
-import ChatPanel from './components/ChatPanel.jsx';
 import Controls from './components/Controls.jsx';
-import Collapsible from './components/Collapsible.jsx';
-import TutorialPanel from './components/TutorialPanel.jsx';
-import HandRankingGuide from './components/HandRankingGuide.jsx';
+import SidePanel from './components/SidePanel.jsx';
 import SpectatorBar from './components/SpectatorBar.jsx';
-import HistoryPanel from './components/HistoryPanel.jsx';
 import SettingsPanel from './components/SettingsPanel.jsx';
 import { t } from './i18n.js';
+
+function SettingsDialog({ dialogRef }) {
+  return (
+    <dialog ref={dialogRef} className="dialog" aria-label={t('settings.title')}>
+      <SettingsPanel />
+      <form method="dialog" className="dialog__actions">
+        <button className="btn btn--primary" type="submit">
+          {t('settings.done')}
+        </button>
+      </form>
+    </dialog>
+  );
+}
+
+function ErrorBar({ error }) {
+  const clearError = useGameStore((s) => s.clearError);
+  if (!error) return null;
+  return (
+    <div className="errorbar" role="alert">
+      <span>{error}</span>
+      <button type="button" className="errorbar__close" onClick={clearError} aria-label={t('app.dismiss')}>
+        ×
+      </button>
+    </div>
+  );
+}
 
 export default function App() {
   const connected = useGameStore((s) => s.connected);
@@ -19,82 +41,76 @@ export default function App() {
   const error = useGameStore((s) => s.error);
   const spectator = useGameStore((s) => s.spectator);
   const locale = useGameStore((s) => s.tutorial.locale);
+  const leave = useGameStore((s) => s.leave);
+  const settingsRef = useRef(null);
 
-  // Sprint 6 a11y — keep the document language attribute in sync with the
-  // active locale so assistive tech announces the correct language.
+  // Keep <html lang> in sync so assistive tech uses the right language.
   useEffect(() => {
-    if (typeof document !== 'undefined' && document.documentElement) {
-      document.documentElement.lang = locale || 'en';
-    }
+    document.documentElement.lang = locale || 'en';
   }, [locale]);
 
-  // Sprint 5: restore the profile (name/avatar) and resolve the local avatar
-  // blob from IndexedDB once, on mount. Pure + idempotent; a failure is silent
-  // because hydrate never throws (autosave is best-effort).
+  // Restore the saved profile (name, avatar, sound, language) once.
   useEffect(() => {
-    const st = useGameStore.getState();
-    if (typeof st.hydrate === 'function') {
-      st.hydrate().catch(() => {});
-    }
+    useGameStore.getState().hydrate();
   }, []);
 
   if (!connected) {
     return (
-      <div className="app">
-        <div className="status status--offline">{t('app.connecting')}</div>
+      <div className="app app--center">
+        <p className="connecting">{t('app.connecting')}</p>
       </div>
     );
   }
 
   if (!tableId) {
     return (
-      <div className="app">
-        {error && <div className="status status--error">{error}</div>}
+      <div className="app app--center">
+        <ErrorBar error={error} />
         <JoinScreen />
-        <SettingsPanel />
       </div>
     );
   }
 
+  const handNumber = snapshot ? snapshot.handNumber : 0;
+
   return (
     <div className="app app--table">
-      <a className="skip-link" href="#main" onClick={(e) => { e.preventDefault(); const m = document.getElementById('main'); if (m) m.focus(); }}>
+      <a className="skip-link" href="#play">
         {t('a11y.skipToTable')}
       </a>
       <header className="topbar">
-        <span className="topbar__title">{t('app.title')}</span>
-        <span className="topbar__meta">{t('app.table', { id: tableId })}</span>
-        <button className="btn btn--ghost" onClick={() => useGameStore.getState().leave()}>
-          {t('app.leave')}
-        </button>
-      </header>
-      <div className="main" id="main" tabIndex={-1}>
-        <div className="main__left">
-          {error && <div className="status status--error">{error}</div>}
-          {spectator.active && <SpectatorBar />}
+        <h1 className="topbar__title">{t('app.title')}</h1>
+        <span className="topbar__meta">
+          {t('app.table', { id: tableId })}
+          {handNumber > 0 && <span className="topbar__hand">{t('app.hand', { n: handNumber })}</span>}
           {snapshot && (
-            <Collapsible id="tutorial" title={t('tutorial.panel')} showHeader={false}>
-              <TutorialPanel />
-            </Collapsible>
+            <span className="topbar__hand">
+              {t('app.blinds', { sb: snapshot.smallBlind, bb: snapshot.bigBlind })}
+            </span>
           )}
-          {snapshot && <Table snapshot={snapshot} />}
-          {snapshot && !spectator.active && <Controls snapshot={snapshot} />}
+        </span>
+        <div className="topbar__actions">
+          <button type="button" className="btn btn--ghost" onClick={() => settingsRef.current?.showModal()}>
+            {t('settings.title')}
+          </button>
+          <button type="button" className="btn btn--ghost" onClick={() => leave()}>
+            {t('app.leave')}
+          </button>
         </div>
-        <aside className="main__right">
-          <Collapsible id="settings" title={t('settings.title')} showHeader={false}>
-            <SettingsPanel />
-          </Collapsible>
-          <Collapsible id="guide" title={t('guide.title')} showHeader={false}>
-            <HandRankingGuide />
-          </Collapsible>
-          <Collapsible id="history" title={t('history.title')} showHeader={false}>
-            <HistoryPanel />
-          </Collapsible>
-          <Collapsible id="chat" title={t('chat.title')} showHeader={false}>
-            <ChatPanel />
-          </Collapsible>
-        </aside>
-      </div>
+      </header>
+
+      <main className="play" id="play" tabIndex={-1}>
+        <div className="play__table">
+          {snapshot ? <Table snapshot={snapshot} /> : <p className="connecting">{t('app.loadingTable')}</p>}
+        </div>
+        <div className="play__bar">
+          <ErrorBar error={error} />
+          {snapshot && (spectator.active ? <SpectatorBar /> : <Controls snapshot={snapshot} />)}
+        </div>
+      </main>
+
+      <SidePanel />
+      <SettingsDialog dialogRef={settingsRef} />
     </div>
   );
 }

@@ -30,6 +30,11 @@ export default function AvatarCropper({ onCommit, onCancel }) {
   const previewRef = useRef(null);
   const rootRef = useRef(null);
   const openerRef = useRef(null);
+  // Always call the latest onCancel from the long-lived Escape listener.
+  const onCancelRef = useRef(onCancel);
+  useEffect(() => {
+    onCancelRef.current = onCancel;
+  });
 
   // Sprint 6 a11y — focus management: move focus into the dialog on open,
   // restore it to the opener on close/cancel, and close on Escape.
@@ -42,7 +47,7 @@ export default function AvatarCropper({ onCommit, onCancel }) {
     const onKey = (e) => {
       if (e.key === 'Escape') {
         e.preventDefault();
-        onCancel();
+        onCancelRef.current();
       }
     };
     window.addEventListener('keydown', onKey);
@@ -53,7 +58,6 @@ export default function AvatarCropper({ onCommit, onCancel }) {
         opener.focus();
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Revoke the object URL on change/unmount (best-effort).

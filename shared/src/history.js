@@ -48,7 +48,10 @@ export function buildHandRecord(game, opts = {}) {
   if (!game) throw new Error('buildHandRecord requires a game table');
 
   const showdown = game.lastShowdown || null;
-  const winners = showdown ? showdown.winnerIds.slice() : [];
+  // Showdown hands list every tied winner; a hand won uncontested (everyone
+  // else folded or left) has its single winner on lastEnd.
+  const foldWinner = game.lastEnd && game.lastEnd.winnerId;
+  const winners = showdown ? showdown.winnerIds.slice() : foldWinner ? [foldWinner] : [];
   const ranked = showdown && showdown.ranked ? showdown.ranked : null;
 
   // Per-player best hand at showdown (only for players who actually reached it).

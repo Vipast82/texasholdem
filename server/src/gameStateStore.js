@@ -28,6 +28,10 @@ export class GameStateStore {
     return this.tables.get(tableId) || null;
   }
 
+  delete(tableId) {
+    return this.tables.delete(tableId);
+  }
+
   listTables() {
     const out = [];
     for (const [id, entry] of this.tables.entries()) {

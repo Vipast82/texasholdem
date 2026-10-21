@@ -13,7 +13,7 @@ forward the `Upgrade` / `Connection` headers. Everything below assumes the app
 listens on `127.0.0.1:3000` (or `0.0.0.0:3000` if you want it reachable directly
 without the proxy — prefer binding to loopback only when a proxy fronts it).
 
-> Node 18+ is required. Build the client once before first start:
+> Node 22.12+ is required. Build the client once before first start:
 > `npm install && npm run build`.
 
 ---

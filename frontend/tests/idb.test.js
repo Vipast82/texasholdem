@@ -12,11 +12,11 @@ beforeEach(() => {
 });
 
 describe('idb wrapper', () => {
-  it('throws a helpful error when no IDB is available', () => {
+  it('throws a helpful error when no IDB is available', async () => {
     idb.setIDBFactory(null);
     // Point the global at "undefined" by removing it (Node has no indexedDB).
     delete globalThis.indexedDB;
-    expect(() => idb.put({ avatarId: 'x' })).rejects.toThrow(/IndexedDB/);
+    await expect(idb.put({ avatarId: 'x' })).rejects.toThrow(/IndexedDB/);
   });
 
   it('puts a record and gets it back by avatarId', async () => {
