@@ -303,8 +303,9 @@ shared, deterministic domain logic (no AI or hand-evaluation code is duplicated)
   what (rate-limited so it never gets chatty) and every seat hears the same
   line. Winning a pot plays a different sting each time (coins, pizzicato,
   steel), big wins get a saloon crowd, bad beats a sad sax. The top bar's
-  **KSAL Saloon Radio** shuffles six CC0 western tracks, with station IDs and DJ
-  jokes between songs, and ducks under voices. Settings has separate volumes
+  **KSAL Saloon Radio** shuffles nine western songs (six CC0, three made for the
+  game), with station IDs and DJ jokes between songs, and ducks under voices.
+  At a heads-up tournament finish it switches to the looping "High Noon". Settings has separate volumes
   for effects, voices and music plus toggles for table talk and dealer calls.
   Sources and licenses: `frontend/public/assets/CREDITS.md`.
 - **Western art pass — animated cards** (`components/Table.jsx` +

@@ -14,9 +14,9 @@ authors deserve thanks, so they are listed anyway.
 | Crowded Pub | Bobjt | https://opengameart.org/content/crowded-pub |
 | Western Style Song | DaGameKnower | https://opengameart.org/content/western-style-song |
 
-"Honky-Tonk Tumbleweed" (`honky-tonk-tumbleweed.mp3`) was generated for this
-game with ACE-Step 1.5 (Apache-2.0 model) and is credited on air to the "KSAL
-House Band".
+"Honky-Tonk Tumbleweed", "Campfire Lullaby", "Barn Burner" and "High Noon"
+(the heads-up showdown song) were generated for this game with ACE-Step 1.5
+(Apache-2.0 model) and are credited on air to the "KSAL House Band".
 
 Tracks were loudness-matched and given short fades; short loops were repeated
 to make full-length songs.

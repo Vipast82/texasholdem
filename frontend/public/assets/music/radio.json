@@ -49,6 +49,28 @@
       "artist": "KSAL House Band",
       "license": "Original (ACE-Step)",
       "source": "Generated for this game with ACE-Step 1.5"
+    },
+    {
+      "file": "/assets/music/campfire-lullaby.mp3",
+      "title": "Campfire Lullaby",
+      "artist": "KSAL House Band",
+      "license": "Original (ACE-Step)",
+      "source": "Generated for this game with ACE-Step 1.5"
+    },
+    {
+      "file": "/assets/music/barn-burner.mp3",
+      "title": "Barn Burner",
+      "artist": "KSAL House Band",
+      "license": "Original (ACE-Step)",
+      "source": "Generated for this game with ACE-Step 1.5"
+    },
+    {
+      "file": "/assets/music/high-noon.mp3",
+      "title": "High Noon",
+      "artist": "KSAL House Band",
+      "license": "Original (ACE-Step)",
+      "source": "Generated for this game with ACE-Step 1.5",
+      "mood": "showdown"
     }
   ]
 }
