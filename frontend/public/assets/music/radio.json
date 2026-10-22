@@ -42,6 +42,13 @@
       "artist": "DaGameKnower",
       "license": "CC0",
       "source": "https://opengameart.org/content/western-style-song"
+    },
+    {
+      "file": "/assets/music/honky-tonk-tumbleweed.mp3",
+      "title": "Honky-Tonk Tumbleweed",
+      "artist": "KSAL House Band",
+      "license": "Original (ACE-Step)",
+      "source": "Generated for this game with ACE-Step 1.5"
     }
   ]
 }
