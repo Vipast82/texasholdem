@@ -73,8 +73,16 @@ export function getProfile(difficulty) {
 }
 
 /** Deterministic name pick for a new bot (uses an injected Rng for stability). */
-export function pickBotName(profile, rng) {
-  const pool = (profile && profile.personality && profile.personality.namePool) || PROFILES.normal.personality.namePool;
-  if (!rng || typeof rng.nextInt !== 'function') return pool[0];
-  return pool[rng.nextInt(pool.length)];
+export function pickBotName(profile, rng, taken = []) {
+  const pool =
+    (profile && profile.personality && profile.personality.namePool) || PROFILES.normal.personality.namePool;
+  // Prefer a name nobody at the table is using; fall back to any name from
+  // every difficulty's pool, then to a numbered name.
+  const used = new Set(taken);
+  const everyName = Object.values(PROFILES).flatMap((p) => p.personality.namePool);
+  const free = pool.filter((n) => !used.has(n));
+  const candidates = free.length ? free : everyName.filter((n) => !used.has(n));
+  if (!candidates.length) return `${pool[0]} ${taken.length + 1}`;
+  if (!rng || typeof rng.nextInt !== 'function') return candidates[0];
+  return candidates[rng.nextInt(candidates.length)];
 }

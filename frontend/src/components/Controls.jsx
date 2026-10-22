@@ -4,74 +4,109 @@ import { useGameStore } from '../store.js';
 import { t } from '../i18n.js';
 import { actionOptions, sizingPresets } from '../actionOptions.js';
 
-/** Raise-size picker: quick pot fractions, a slider, and an exact number box. */
-function RaiseControls({ opts, onRaise }) {
-  const [total, setTotal] = useState(opts.minTotal);
-  const clamped = Math.max(opts.minTotal, Math.min(opts.maxTotal, Number(total) || opts.minTotal));
-  const label = opts.raiseAction === 'bet' ? 'controls.betTo' : 'controls.raiseTo';
+const fmt = (n) => Number(n).toLocaleString();
+
+/** Your turn: Fold / Check-or-Call / Raise, plus bet sizing. */
+function TurnPanel({ opts, onAct }) {
+  const [want, setWant] = useState(opts.raiseAction ? opts.minTotal : 0);
+  const allInTotal = opts.committed + opts.stack;
+  const amount = Math.max(opts.minTotal, Math.min(opts.maxTotal, Number(want) || opts.minTotal));
+  const raiseIsAllIn = opts.raiseAction && amount >= allInTotal;
   const presets = sizingPresets(opts);
 
+  const raise = () => {
+    if (raiseIsAllIn || !opts.raiseAction) onAct('allin');
+    else onAct(opts.raiseAction, amount);
+  };
+
+  const raiseLabel =
+    !opts.raiseAction || raiseIsAllIn
+      ? t('controls.act.allin')
+      : t(opts.raiseAction === 'bet' ? 'controls.act.bet' : 'controls.act.raise');
+  const raiseAmount = !opts.raiseAction || raiseIsAllIn ? allInTotal : amount;
+  // An all-in that cannot even cover the call is offered on the call button.
+  const showRaise = opts.raiseAction || allInTotal > opts.committed + opts.toCall;
+
   return (
-    <div className="raise">
-      <div className="raise__presets">
-        {presets.map((p) => (
-          <button
-            key={p.key}
-            type="button"
-            className={`chipbtn${clamped === p.total ? ' chipbtn--on' : ''}`}
-            onClick={() => setTotal(p.total)}
-          >
-            {t(`controls.size.${p.key}`)}
+    <div className="actions" role="group" aria-label={t('controls.yourTurn')}>
+      <div className="actions__main">
+        <button type="button" className="act act--fold" onClick={() => onAct('fold')}>
+          {t('controls.act.fold')}
+        </button>
+        {opts.canCheck ? (
+          <button type="button" className="act act--call" onClick={() => onAct('check')}>
+            {t('controls.act.check')}
           </button>
-        ))}
+        ) : (
+          <button type="button" className="act act--call" onClick={() => onAct('call')}>
+            {opts.callAmount < opts.toCall ? t('controls.act.allin') : t('controls.act.call')}
+            <small>{fmt(opts.callAmount)}</small>
+          </button>
+        )}
+        {showRaise && (
+          <button type="button" className="act act--raise" onClick={raise}>
+            {raiseLabel}
+            <small>{fmt(raiseAmount)}</small>
+          </button>
+        )}
       </div>
-      <div className="raise__pick">
-        <input
-          type="range"
-          className="raise__slider"
-          min={opts.minTotal}
-          max={opts.maxTotal}
-          step={1}
-          value={clamped}
-          onChange={(e) => setTotal(Number(e.target.value))}
-          aria-label={t('controls.amount')}
-        />
-        <input
-          type="number"
-          className="raise__amount"
-          min={opts.minTotal}
-          max={opts.maxTotal}
-          value={total}
-          onChange={(e) => setTotal(e.target.value)}
-          onBlur={() => setTotal(clamped)}
-          aria-label={t('controls.amount')}
-        />
-      </div>
-      <button type="button" className="btn btn--raise" onClick={() => onRaise(opts.raiseAction, clamped)}>
-        {t(label, { n: clamped.toLocaleString() })}
-      </button>
+
+      {opts.raiseAction && (
+        <div className="actions__size">
+          <div className="actions__presets" role="group" aria-label={t('controls.amount')}>
+            {presets.map((p) => (
+              <button
+                key={p.key}
+                type="button"
+                className={`preset${amount === p.total ? ' preset--on' : ''}`}
+                onClick={() => setWant(p.total)}
+              >
+                {t(`controls.size.${p.key}`)}
+              </button>
+            ))}
+          </div>
+          <input
+            type="number"
+            className="actions__amount"
+            min={opts.minTotal}
+            max={opts.maxTotal}
+            value={want}
+            onChange={(e) => setWant(e.target.value)}
+            onBlur={() => setWant(amount)}
+            aria-label={t('controls.amount')}
+          />
+          <input
+            type="range"
+            className="actions__slider"
+            min={opts.minTotal}
+            max={opts.maxTotal}
+            step={1}
+            value={amount}
+            onChange={(e) => setWant(Number(e.target.value))}
+            aria-label={t('controls.amount')}
+          />
+        </div>
+      )}
     </div>
   );
 }
 
-function WaitingBar({ snapshot }) {
+function WaitingPanel({ snapshot }) {
   const botActions = useGameStore((s) => s.botActions);
   const nextActor = snapshot.nextActorId ? snapshot.players.find((p) => p.id === snapshot.nextActorId) : null;
   const note = nextActor && nextActor.isBot ? botActions[nextActor.id] : null;
+  let text = t('controls.waiting');
+  if (nextActor) {
+    text = nextActor.isBot
+      ? t('controls.botThinking', { name: nextActor.name })
+      : t('controls.waitingFor', { name: nextActor.name });
+  }
   return (
-    <div className="controls controls--waiting" role="status" aria-live="polite">
-      <span className="controls__dot" aria-hidden="true" />
-      {nextActor ? (
-        <span className="controls__waiting">
-          {nextActor.isBot
-            ? t('controls.botThinking', { name: nextActor.name })
-            : t('controls.waitingFor', { name: nextActor.name })}
-        </span>
-      ) : (
-        <span className="controls__waiting">{t('controls.waiting')}</span>
-      )}
+    <div className="actions actions--waiting" role="status" aria-live="polite">
+      <span className="actions__dot" aria-hidden="true" />
+      <span className="actions__waiting">{text}</span>
       {note && (
-        <span className="controls__botreason" title={note.reason}>
+        <span className="actions__note" title={note.reason}>
           {t('controls.lastMove', { action: note.action })}
         </span>
       )}
@@ -79,7 +114,7 @@ function WaitingBar({ snapshot }) {
   );
 }
 
-function IdleBar({ snapshot }) {
+function IdlePanel({ snapshot }) {
   const playerId = useGameStore((s) => s.playerId);
   const rebuy = useGameStore((s) => s.rebuy);
   const startHand = useGameStore((s) => s.startHand);
@@ -98,25 +133,25 @@ function IdleBar({ snapshot }) {
   };
 
   return (
-    <div className="controls controls--idle">
-      {busted ? (
-        <button type="button" className="btn btn--primary btn--lg" onClick={() => rebuy()}>
-          {t('controls.rebuy', { n: snapshot.startingStack.toLocaleString() })}
-        </button>
-      ) : (
-        <button
-          type="button"
-          className="btn btn--primary btn--lg"
-          onClick={() => startHand()}
-          disabled={funded < 2 && snapshot.players.length > 0}
-        >
-          {t('controls.startHand')}
-        </button>
-      )}
-      <div className="controls__cpu" title={t('controls.addCpuHint')}>
-        <label htmlFor="cpu-difficulty" className="controls__cpu-label">
-          {t('controls.addCpu')}
-        </label>
+    <div className="actions actions--idle">
+      <div className="actions__main">
+        {busted ? (
+          <button type="button" className="act act--raise" onClick={() => rebuy()}>
+            {t('controls.rebuy', { n: fmt(snapshot.startingStack) })}
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="act act--call"
+            onClick={() => startHand()}
+            disabled={funded < 2 && snapshot.players.length > 0}
+          >
+            {t('controls.startHand')}
+          </button>
+        )}
+      </div>
+      <div className="actions__cpu" title={t('controls.addCpuHint')}>
+        <label htmlFor="cpu-difficulty">{t('controls.addCpu')}</label>
         <select
           id="cpu-difficulty"
           value={cpuDifficulty}
@@ -129,14 +164,14 @@ function IdleBar({ snapshot }) {
             </option>
           ))}
         </select>
-        <button type="button" className="btn btn--ghost" onClick={onAddCpu} disabled={seatsFull || adding}>
+        <button type="button" className="preset" onClick={onAddCpu} disabled={seatsFull || adding}>
           {adding ? t('controls.addingCpu') : `+ ${t('controls.cpu')}`}
         </button>
       </div>
       {!busted && funded < 2 && snapshot.players.length > 0 && (
-        <p className="controls__hint">{t('controls.needPlayers')}</p>
+        <p className="actions__hint">{t('controls.needPlayers')}</p>
       )}
-      {seatsFull && <p className="controls__hint">{t('controls.tableFull')}</p>}
+      {seatsFull && <p className="actions__hint">{t('controls.tableFull')}</p>}
     </div>
   );
 }
@@ -145,46 +180,17 @@ export default function Controls({ snapshot }) {
   const playerId = useGameStore((s) => s.playerId);
   const playerAction = useGameStore((s) => s.playerAction);
 
-  if (!snapshot.inHand) return <IdleBar snapshot={snapshot} />;
-
+  const me = snapshot.players.find((p) => p.id === playerId);
+  const sittingOut = me && me.chips === 0 && me.status !== 'in-hand';
+  // Out of chips: offer the buy-back even while the others play on.
+  if (!snapshot.inHand || sittingOut) return <IdlePanel snapshot={snapshot} />;
   const opts = actionOptions(snapshot, playerId);
-  if (!opts) return <WaitingBar snapshot={snapshot} />;
-
-  const allInTotal = opts.committed + opts.stack;
+  if (!opts) return <WaitingPanel snapshot={snapshot} />;
   return (
-    <div className="controls controls--turn" role="group" aria-label={t('controls.yourTurn')}>
-      <div className="controls__info">
-        <span className="controls__turn">{t('controls.yourTurn')}</span>
-        {opts.toCall > 0 && <span>{t('controls.toCall', { n: opts.toCall.toLocaleString() })}</span>}
-      </div>
-      <div className="controls__actions">
-        <button type="button" className="btn btn--fold" onClick={() => playerAction('fold')}>
-          {t('controls.fold')}
-        </button>
-        {opts.canCheck ? (
-          <button type="button" className="btn btn--call" onClick={() => playerAction('check')}>
-            {t('controls.check')}
-          </button>
-        ) : (
-          <button type="button" className="btn btn--call" onClick={() => playerAction('call')}>
-            {opts.callAmount < opts.toCall
-              ? t('controls.callAllin', { n: opts.callAmount.toLocaleString() })
-              : t('controls.call', { n: opts.callAmount.toLocaleString() })}
-          </button>
-        )}
-        {opts.raiseAction && (
-          <RaiseControls
-            key={`${snapshot.handNumber}-${snapshot.street}-${opts.minTotal}`}
-            opts={opts}
-            onRaise={playerAction}
-          />
-        )}
-        {allInTotal > snapshot.currentBet && (
-          <button type="button" className="btn btn--allin" onClick={() => playerAction('allin')}>
-            {t('controls.allinN', { n: allInTotal.toLocaleString() })}
-          </button>
-        )}
-      </div>
-    </div>
+    <TurnPanel
+      key={`${snapshot.handNumber}-${snapshot.street}-${snapshot.currentBet}`}
+      opts={opts}
+      onAct={playerAction}
+    />
   );
 }

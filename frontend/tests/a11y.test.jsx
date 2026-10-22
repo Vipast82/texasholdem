@@ -40,7 +40,6 @@ import TutorialPanel from '../src/components/TutorialPanel.jsx';
 import Controls from '../src/components/Controls.jsx';
 import AvatarCropper from '../src/components/AvatarCropper.jsx';
 import SeatAvatar from '../src/components/SeatAvatar.jsx';
-import StickFigure from '../src/components/StickFigure.jsx';
 
 /** Reset the store to a known state between tests (store is a shared singleton). */
 function resetStore() {
@@ -126,14 +125,6 @@ describe('roles + accessible names on key controls', () => {
       const inLabel = el.closest('label');
       expect(labelled || inLabel).toBeTruthy();
     });
-  });
-
-  it('SeatAvatar and StickFigure expose role=img with localized names', () => {
-    const player = { id: 'me', name: 'Sheriff', isBot: false };
-    render(<StickFigure player={player} pose='idle' />);
-    const img = document.querySelector('.stickfigure');
-    expect(img.getAttribute('role')).toBe('img');
-    expect(img.getAttribute('aria-label')).toContain('Sheriff');
   });
 
   it('SeatAvatar has an accessible name for a named player', () => {

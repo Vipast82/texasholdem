@@ -58,25 +58,19 @@ export function actionOptions(snapshot, playerId) {
 }
 
 /**
- * Quick bet sizes as fractions of the pot (after calling), clamped to the
- * legal range and de-duplicated. Returns [{ key, total }].
+ * Quick bet sizes (MIN, ½ pot, ⅔ pot, POT, MAX), clamped to the legal range.
+ * Pot fractions are of the pot after calling. Returns [{ key, total }].
  */
 export function sizingPresets(opts) {
   if (!opts || !opts.raiseAction) return [];
   const potAfterCall = opts.pot + opts.toCall;
   const base = opts.committed + opts.toCall;
-  const sizes = [
-    { key: 'half', total: base + Math.round(potAfterCall / 2) },
-    { key: 'threeQuarter', total: base + Math.round((potAfterCall * 3) / 4) },
-    { key: 'pot', total: base + potAfterCall }
+  const clamp = (n) => Math.max(opts.minTotal, Math.min(opts.maxTotal, Math.round(n)));
+  return [
+    { key: 'min', total: opts.minTotal },
+    { key: 'half', total: clamp(base + potAfterCall / 2) },
+    { key: 'twoThirds', total: clamp(base + (potAfterCall * 2) / 3) },
+    { key: 'pot', total: clamp(base + potAfterCall) },
+    { key: 'max', total: opts.maxTotal }
   ];
-  const seen = new Set();
-  const out = [];
-  for (const s of sizes) {
-    const total = Math.max(opts.minTotal, Math.min(opts.maxTotal, s.total));
-    if (seen.has(total)) continue;
-    seen.add(total);
-    out.push({ key: s.key, total });
-  }
-  return out;
 }

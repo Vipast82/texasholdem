@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { avatarStore } from '../services/avatarStore.js';
+import { characterSvg } from '../services/characterArt.js';
 import { resolveAvatarView, avatarCss, cropCss } from '../services/avatarView.js';
 import { useGameStore } from '../store.js';
 import { t } from '../i18n.js';
@@ -28,10 +28,7 @@ const fetchInFlight = new Map();
 /** Resolve a server-shared avatar to an object URL (null when unavailable). */
 function loadRemoteAvatar(id) {
   if (remoteAvatarCache.has(id)) return Promise.resolve(remoteAvatarCache.get(id));
-  const base =
-    typeof window !== 'undefined' && window.location
-      ? window.location.origin
-      : null;
+  const base = typeof window !== 'undefined' && window.location ? window.location.origin : null;
   if (!base || typeof fetch !== 'function') {
     remoteAvatarCache.set(id, null);
     return Promise.resolve(null);
@@ -86,11 +83,13 @@ export default function SeatAvatar({ player, size = 44, isMe = false }) {
     // Only the avatar THIS client actually has stored is addressable.
     const avatarById =
       myAvatar && myAvatar.id ? { [myAvatar.id]: { url: myAvatar.url, crop: myAvatar.crop } } : null;
-    const botSrc = (d) => avatarStore.avatarForBot(d).src;
+    // Everyone without a picture gets their own seeded western character.
+    const seed = (player && (player.name || player.id)) || 'stranger';
+    const botSrc = (d) => characterSvg(seed, d);
     let resolved = resolveAvatarView(player, {
       avatarById,
       botSrc,
-      defaultSrc: avatarStore.avatarForBot('normal').src
+      defaultSrc: characterSvg(seed, 'normal')
     });
     // The LOCAL player is authoritative for their own avatar: if I have an
     // uploaded image, ALWAYS show it on my own seat, regardless of whether the
@@ -105,26 +104,26 @@ export default function SeatAvatar({ player, size = 44, isMe = false }) {
     }
     // Sprint 7 — SHARED avatar for another player: use the fetched object URL.
     // We don't know the remote source dims, so render with a simple cover.
-    if (
-      remoteUrl &&
-      metaId &&
-      resolved.kind === 'default' &&
-      !(isMe && myAvatar && myAvatar.id === metaId)
-    ) {
+    if (remoteUrl && metaId && resolved.kind === 'default' && !(isMe && myAvatar && myAvatar.id === metaId)) {
       resolved = { kind: 'upload', src: remoteUrl, crop: null, avatarId: metaId };
     }
     return resolved;
   }, [player, myAvatar, isMe, remoteUrl, metaId]);
 
   if (!view || !view.src) {
-    return <div className="seatavatar seatavatar--empty" style={{ width: size, height: size }} aria-hidden="true" />;
+    return (
+      <div
+        className="seatavatar seatavatar--empty"
+        style={{ width: size, height: size }}
+        aria-hidden="true"
+      />
+    );
   }
 
   // Uploaded avatar with a crop window: frame it with cropCss using the stored
   // source dimensions. Everything else uses the simple cover descriptor.
   const c = view.crop;
-  const isCroppedUpload =
-    view.kind === 'upload' && c && c.size && myAvatar && myAvatar.srcW && myAvatar.srcH;
+  const isCroppedUpload = view.kind === 'upload' && c && c.size && myAvatar && myAvatar.srcW && myAvatar.srcH;
   const style = isCroppedUpload
     ? {
         backgroundImage: `url("${view.src}")`,
@@ -139,11 +138,7 @@ export default function SeatAvatar({ player, size = 44, isMe = false }) {
       style={{ width: size, height: size, ...style }}
       title={player ? player.name : undefined}
       role="img"
-      aria-label={
-        player && player.name
-          ? t('a11y.avatar', { name: player.name })
-          : t('a11y.avatar.default')
-      }
+      aria-label={player && player.name ? t('a11y.avatar', { name: player.name }) : t('a11y.avatar.default')}
     />
   );
 }

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect } from 'react';
 import { useGameStore } from '../store.js';
 import { t } from '../i18n.js';
 import ChatPanel from './ChatPanel.jsx';
@@ -6,18 +6,9 @@ import EmoteBar from './EmoteBar.jsx';
 import HistoryPanel from './HistoryPanel.jsx';
 import TutorialPanel from './TutorialPanel.jsx';
 import HandRankingGuide from './HandRankingGuide.jsx';
+import { CloseIcon } from './Icons.jsx';
 
-const TABS = ['chat', 'history', 'learn'];
-const STORAGE_KEY = 'saloon.sideTab';
-
-function readTab() {
-  try {
-    const v = localStorage.getItem(STORAGE_KEY);
-    return TABS.includes(v) ? v : 'chat';
-  } catch (err) {
-    return 'chat';
-  }
-}
+export const SIDE_TABS = ['chat', 'history', 'learn'];
 
 function OddsToggle() {
   const hud = useGameStore((s) => s.hud);
@@ -34,58 +25,62 @@ function OddsToggle() {
 }
 
 /**
- * The right-hand panel: chat, hand history and the learning tools share one
- * tabbed area so the table keeps most of the screen.
+ * Slide-out drawer holding chat, hand history and the learning tools, so the
+ * table can use the whole screen. It stays mounted while closed so the
+ * tutorial keeps listening to the game.
  */
-export default function SidePanel() {
+export default function SidePanel({ open, tab, onTab, onClose }) {
   const playerId = useGameStore((s) => s.playerId);
-  const chatCount = useGameStore((s) => s.chat.length);
-  const [tab, setTab] = useState(readTab);
-  const [seenChat, setSeenChat] = useState(chatCount);
-  const unread = tab === 'chat' ? 0 : chatCount - seenChat;
 
-  const select = (next) => {
-    setTab(next);
-    if (next === 'chat' || tab === 'chat') setSeenChat(chatCount);
-    try {
-      localStorage.setItem(STORAGE_KEY, next);
-    } catch (err) {
-      // a remembered tab is only a convenience
-    }
-  };
+  // Escape closes the drawer.
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (e) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
 
   // Arrow keys move between tabs (standard tablist keyboard pattern).
   const onKeyDown = (e) => {
     if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
     e.preventDefault();
-    const step = e.key === 'ArrowRight' ? 1 : TABS.length - 1;
-    const next = TABS[(TABS.indexOf(tab) + step) % TABS.length];
-    select(next);
+    const step = e.key === 'ArrowRight' ? 1 : SIDE_TABS.length - 1;
+    const next = SIDE_TABS[(SIDE_TABS.indexOf(tab) + step) % SIDE_TABS.length];
+    onTab(next);
     document.getElementById(`sidetab-${next}`)?.focus();
   };
 
   return (
-    <aside className="side" aria-label={t('side.label')}>
-      <div className="side__tabs" role="tablist" aria-label={t('side.label')} onKeyDown={onKeyDown}>
-        {TABS.map((name) => (
-          <button
-            key={name}
-            id={`sidetab-${name}`}
-            type="button"
-            role="tab"
-            className="side__tab"
-            aria-selected={tab === name}
-            aria-controls={`sidepanel-${name}`}
-            tabIndex={tab === name ? 0 : -1}
-            onClick={() => select(name)}
-          >
-            {t(`side.${name}`)}
-            {name === 'chat' && unread > 0 && <span className="side__badge">{unread}</span>}
-          </button>
-        ))}
+    <aside
+      className={`side${open ? ' side--open' : ''}`}
+      aria-label={t('side.label')}
+      inert={open ? undefined : true}
+    >
+      <div className="side__head">
+        <div className="side__tabs" role="tablist" aria-label={t('side.label')} onKeyDown={onKeyDown}>
+          {SIDE_TABS.map((name) => (
+            <button
+              key={name}
+              id={`sidetab-${name}`}
+              type="button"
+              role="tab"
+              className="side__tab"
+              aria-selected={tab === name}
+              aria-controls={`sidepanel-${name}`}
+              tabIndex={tab === name ? 0 : -1}
+              onClick={() => onTab(name)}
+            >
+              {t(`side.${name}`)}
+            </button>
+          ))}
+        </div>
+        <button type="button" className="iconbtn" onClick={onClose} aria-label={t('side.close')}>
+          <CloseIcon />
+        </button>
       </div>
 
-      {/* All panels stay mounted so the tutorial keeps listening to the game. */}
       <div
         className="side__body"
         role="tabpanel"

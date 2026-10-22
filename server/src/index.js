@@ -539,7 +539,8 @@ io.on('connection', (socket) => {
     if (seat < 0) throw new Error('table full');
     const profile = getProfile(difficulty);
     const botId = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const botName = pickBotName(profile, new Rng(`name:${botId}`));
+    const taken = entry.table.players.map((p) => p.name);
+    const botName = pickBotName(profile, new Rng(`name:${botId}`), taken);
     entry.table.addPlayer({ id: botId, name: botName, seat, isBot: true, bot: { difficulty } });
     entry.players.set(botId, { name: botName, socketId: null });
     return botId;

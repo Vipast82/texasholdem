@@ -3,6 +3,7 @@ import { DIFFICULTIES } from '@saloon/shared';
 import { useGameStore } from '../store.js';
 import { t } from '../i18n.js';
 import AvatarCropper from './AvatarCropper.jsx';
+import { characterSvg } from '../services/characterArt.js';
 
 const MODES = ['ai', 'friends', 'watch'];
 
@@ -73,9 +74,11 @@ export default function JoinScreen() {
               aria-hidden="true"
             />
           ) : (
-            <span className="join__avatarimg join__avatarimg--empty" aria-hidden="true">
-              🤠
-            </span>
+            <span
+              className="join__avatarimg"
+              style={{ backgroundImage: `url("${characterSvg(shownName)}")` }}
+              aria-hidden="true"
+            />
           )}
           <button type="button" className="linkbtn" onClick={() => setCropping(true)}>
             {avatar.id ? t('join.avatarChange') : t('join.avatarPick')}

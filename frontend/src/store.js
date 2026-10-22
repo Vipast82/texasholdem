@@ -47,6 +47,7 @@ const TABLE_STATE = () => ({
   snapshot: null,
   chat: [],
   botActions: {},
+  actions: {}, // playerId -> { action, amount } for the current street
   spectator: { ...SPECTATOR_DEFAULTS },
   history: { ...HISTORY_DEFAULTS },
   emotes: {}
@@ -61,6 +62,7 @@ const initialState = {
   chat: [],
   error: null,
   botActions: {}, // playerId -> { action, reason, confidence, ts }
+  actions: {}, // playerId -> { action, amount } for the current street
   tutorial: { ...TUTORIAL_DEFAULTS },
   hud: { ...HUD_DEFAULTS },
   spectator: { ...SPECTATOR_DEFAULTS },
@@ -126,6 +128,9 @@ export const useGameStore = create((set, get) => ({
     // All of these are best-effort and MUST never break the game flow.
     try {
       if (event === 'actionTaken' && payload) {
+        set((st) => ({
+          actions: { ...st.actions, [payload.playerId]: { action: payload.action, amount: payload.amount } }
+        }));
         const s = resolveActionSound(payload);
         if (s) sfxService.play(s);
         // Sprint 6 — auto emote for the LOCAL player's own actions
@@ -156,11 +161,12 @@ export const useGameStore = create((set, get) => ({
           get().recordHandEnd(payload); // autosave profile/stats (best-effort)
         }
       } else if (event === 'handStarted') {
-        set({ botActions: {} }); // last hand's "Called" / "Raised" labels are stale now
+        set({ botActions: {}, actions: {} }); // last hand's "Called" / "Raised" labels are stale now
         sfxService.play('shuffle');
       } else if (event === 'holeDealt') {
         sfxService.play('deal');
       } else if (event === 'streetStarted') {
+        set({ actions: {} }); // a new betting round starts with a clean slate
         const street = payload && payload.street;
         if (street === 'flop' || street === 'turn' || street === 'river') {
           sfxService.play('flip');

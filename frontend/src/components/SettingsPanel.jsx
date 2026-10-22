@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useGameStore } from '../store.js';
 import { t } from '../i18n.js';
 import AvatarCropper from './AvatarCropper.jsx';
+import { characterSvg } from '../services/characterArt.js';
 
 /** Language, sound and table picture. All state lives in the store. */
 export default function SettingsPanel() {
@@ -14,6 +15,7 @@ export default function SettingsPanel() {
   const resetAvatar = useGameStore((s) => s.resetAvatar);
   const locale = useGameStore((s) => s.tutorial.locale);
   const setLocale = useGameStore((s) => s.setLocale);
+  const playerName = useGameStore((s) => s.name || s.profile.name || 'Gunslinger');
   const [cropping, setCropping] = useState(false);
 
   const onCommit = async (file, crop, dims) => {
@@ -67,9 +69,11 @@ export default function SettingsPanel() {
                 aria-hidden="true"
               />
             ) : (
-              <span className="join__avatarimg join__avatarimg--empty" aria-hidden="true">
-                🤠
-              </span>
+              <span
+                className="join__avatarimg"
+                style={{ backgroundImage: `url("${characterSvg(playerName)}")` }}
+                aria-hidden="true"
+              />
             )}
             <button
               type="button"
