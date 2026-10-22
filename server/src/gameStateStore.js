@@ -10,17 +10,32 @@ export class GameStateStore {
     this.defaults = defaults;
   }
 
-  getOrCreate(tableId, config = {}) {
+  /**
+   * The table for `tableId`, created with `settings` (already sanitized) if it
+   * does not exist yet. Settings only apply when the table is created.
+   */
+  getOrCreate(tableId, settings = null) {
     if (this.tables.has(tableId)) return this.tables.get(tableId);
+    const s = settings || this.defaults;
     const table = new GameTable({
       tableId,
-      smallBlind: config.smallBlind || this.defaults.smallBlind || 10,
-      bigBlind: config.bigBlind || this.defaults.bigBlind || 20,
-      startingStack: config.startingStack || this.defaults.startingStack || 1500,
-      gameType: config.gameType || this.defaults.gameType || 'no-limit',
-      tutorialSeed: config.tutorialSeed
+      smallBlind: s.smallBlind || 10,
+      bigBlind: s.bigBlind || 20,
+      startingStack: s.startingStack || 1500,
+      gameType: s.gameType || 'no-limit',
+      tutorialSeed: s.tutorialSeed
     });
-    this.tables.set(tableId, { table, players: new Map() });
+    this.tables.set(tableId, {
+      table,
+      players: new Map(), // playerId -> { name, socketId, timeouts, buyIns }
+      settings: s,
+      reads: {}, // opponent model for the CPUs
+      session: {}, // playerId -> { handsWon, biggestPot }
+      tour: null, // tournament state (see server)
+      turn: null, // pending shot clock
+      dealTimer: null,
+      nextHandAt: null
+    });
     return this.tables.get(tableId);
   }
 

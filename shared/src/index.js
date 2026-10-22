@@ -6,7 +6,8 @@ export * from './bettingRules.js';
 export { GameTable } from './gameEngine.js';
 
 // AI (Sprint 2) - pure, deterministic. Re-export the public surface.
-export { getProfile, DIFFICULTIES, pickBotName } from './ai/aiProfiles.js';
+export { getProfile, DIFFICULTIES, pickBotName, personaFor, styleLabel } from './ai/aiProfiles.js';
+export { emptyStats, recordHand as recordOpponentHand, readOf } from './ai/opponentModel.js';
 export { estimateWinTieLose } from './ai/aiMonteCarlo.js';
 export { handStrength, potOddsRequired, rankCandidates } from './ai/aiDecision.js';
 export {

@@ -36,7 +36,11 @@ export function CardRow({ cards, titlePrefix = '' }) {
   const list = Array.isArray(cards) ? cards.filter((c) => c && c.length >= 2) : [];
   if (list.length === 0) return null;
   return (
-    <span className="cardrow" role="group" aria-label={titlePrefix ? `${titlePrefix} ${list.join(' ')}` : list.join(' ')}>
+    <span
+      className="cardrow"
+      role="group"
+      aria-label={titlePrefix ? `${titlePrefix} ${list.join(' ')}` : list.join(' ')}
+    >
       {list.map((c, i) => (
         <CardTile key={`${c}-${i}`} card={c} title={`${titlePrefix} ${c}`} />
       ))}

@@ -58,6 +58,99 @@ function HandReadout({ snapshot, playerId, locale }) {
   );
 }
 
+/** Short-lived table announcements (joins, blinds going up, eliminations…). */
+function Toasts() {
+  const toasts = useGameStore((s) => s.toasts);
+  const dismiss = useGameStore((s) => s.dismissToast);
+  if (!toasts.length) return null;
+  return (
+    <div className="toasts" role="status" aria-live="polite">
+      {toasts.map((n) => (
+        <button key={n.id} type="button" className="toast" onClick={() => dismiss(n.id)}>
+          {t(n.key, n.vars)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Final standings when a tournament ends, with a rematch. */
+function TournamentOver({ snapshot, playerId }) {
+  const restart = useGameStore((s) => s.restartTournament);
+  const leave = useGameStore((s) => s.leave);
+  const tour = snapshot && snapshot.tournament;
+  if (!tour || !tour.finished || !tour.standings) return null;
+  const mine = tour.standings.find((r) => r.id === playerId);
+  return (
+    <div className="overlay" role="dialog" aria-modal="true" aria-labelledby="tour-title">
+      <div className="overlay__card">
+        <h2 id="tour-title" className="overlay__title">
+          {mine && mine.place === 1 ? t('tour.youWon') : t('tour.over')}
+        </h2>
+        {mine && mine.place > 1 && <p className="overlay__sub">{t('tour.youPlaced', { n: mine.place })}</p>}
+        <ol className="standings">
+          {tour.standings.map((r) => (
+            <li key={r.id} className={`standings__row${r.id === playerId ? ' standings__row--me' : ''}`}>
+              <span className="standings__place">{r.place}</span>
+              <span className="standings__name">{r.name}</span>
+              {r.place === 1 && <span className="standings__badge">{t('tour.champion')}</span>}
+            </li>
+          ))}
+        </ol>
+        <div className="overlay__actions">
+          <button type="button" className="btn btn--ghost" onClick={() => leave()}>
+            {t('app.leave')}
+          </button>
+          <button type="button" className="btn btn--primary" onClick={() => restart()}>
+            {t('tour.again')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Table info in the HUD: hand number, blinds, players — plus the tournament clock. */
+function TableInfo({ snapshot, tableId }) {
+  const handNumber = snapshot ? snapshot.handNumber : 0;
+  const tour = snapshot && snapshot.tournament;
+  return (
+    <div className="hudbar__box hudbar__info">
+      <span>{handNumber > 0 ? t('hud.handNo', { n: handNumber }) : t('app.table', { id: tableId })}</span>
+      {snapshot && (
+        <span>
+          {tour ? t('hud.level', { n: tour.level }) + ' · ' : ''}
+          {t('app.blinds', { sb: snapshot.smallBlind, bb: snapshot.bigBlind })}
+        </span>
+      )}
+      {tour && !tour.finished ? (
+        <span>
+          {t('hud.nextLevel', { sb: tour.nextBlinds[0], bb: tour.nextBlinds[1], n: tour.handsLeftInLevel })}
+        </span>
+      ) : (
+        <span>{t('hud.players', { n: snapshot ? snapshot.players.length : 0 })}</span>
+      )}
+    </div>
+  );
+}
+
+/** Sit out the next hands (or come back). */
+function SitOutToggle({ snapshot, playerId }) {
+  const sitOut = useGameStore((s) => s.sitOut);
+  const me = snapshot && snapshot.players.find((p) => p.id === playerId);
+  if (!me) return null;
+  return (
+    <button
+      type="button"
+      className={`sitout${me.sittingOut ? ' sitout--on' : ''}`}
+      aria-pressed={!!me.sittingOut}
+      onClick={() => sitOut(!me.sittingOut)}
+    >
+      {me.sittingOut ? t('hud.imBack') : t('hud.sitOut')}
+    </button>
+  );
+}
+
 export default function App() {
   const connected = useGameStore((s) => s.connected);
   const tableId = useGameStore((s) => s.tableId);
@@ -70,6 +163,7 @@ export default function App() {
   const sfx = useGameStore((s) => s.sfx);
   const setSfx = useGameStore((s) => s.setSfx);
   const leave = useGameStore((s) => s.leave);
+  const fourColor = useGameStore((s) => s.profile.settings.fourColor);
   const settingsRef = useRef(null);
 
   const [drawer, setDrawer] = useState({ open: false, tab: 'chat' });
@@ -111,11 +205,8 @@ export default function App() {
     );
   }
 
-  const handNumber = snapshot ? snapshot.handNumber : 0;
-  const seated = snapshot ? snapshot.players.length : 0;
-
   return (
-    <div className={`game${drawer.open ? ' game--drawer' : ''}`}>
+    <div className={`game${drawer.open ? ' game--drawer' : ''}${fourColor ? ' game--fourcolor' : ''}`}>
       <a className="skip-link" href="#play">
         {t('a11y.skipToTable')}
       </a>
@@ -140,6 +231,7 @@ export default function App() {
           </div>
         </header>
         <ErrorBar error={error} />
+        <Toasts />
         <div className="stage__table">
           {snapshot ? <Table snapshot={snapshot} /> : <p className="connecting">{t('app.loadingTable')}</p>}
         </div>
@@ -156,14 +248,9 @@ export default function App() {
           {snapshot && (spectator.active ? <SpectatorBar /> : <Controls snapshot={snapshot} />)}
         </div>
         <div className="hudbar__right">
-          <div className="hudbar__box hudbar__info">
-            <span>
-              {handNumber > 0 ? t('hud.handNo', { n: handNumber }) : t('app.table', { id: tableId })}
-            </span>
-            {snapshot && <span>{t('app.blinds', { sb: snapshot.smallBlind, bb: snapshot.bigBlind })}</span>}
-            <span>{t('hud.players', { n: seated })}</span>
-          </div>
+          <TableInfo snapshot={snapshot} tableId={tableId} />
           <div className="hudbar__buttons">
+            {!spectator.active && <SitOutToggle snapshot={snapshot} playerId={playerId} />}
             <IconButton label={t('hud.history')} onClick={() => openDrawer('history')}>
               <HistoryIcon />
             </IconButton>
@@ -174,6 +261,7 @@ export default function App() {
         </div>
       </footer>
 
+      <TournamentOver snapshot={snapshot} playerId={playerId} />
       <SidePanel open={drawer.open} tab={drawer.tab} onTab={selectTab} onClose={closeDrawer} />
       <SettingsDialog dialogRef={settingsRef} />
     </div>

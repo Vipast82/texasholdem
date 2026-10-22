@@ -126,7 +126,7 @@ export default function AvatarCropper({ onCommit, onCancel }) {
     const dy = e.clientY - start.y;
     const el = previewRef.current;
     const px = el ? el.clientWidth : 120;
-    const scale = (crop.size / Math.max(1, px)) || 1;
+    const scale = crop.size / Math.max(1, px) || 1;
     const cx = (center.x == null ? dims.w / 2 : center.x) + dx * scale;
     const cy = (center.y == null ? dims.h / 2 : center.y) + dy * scale;
     dragRef.current = { x: e.clientX, y: e.clientY };
@@ -164,7 +164,7 @@ export default function AvatarCropper({ onCommit, onCancel }) {
   };
 
   return (
-    <div className="cropper" role="dialog" aria-modal="true" aria-label={t('join.avatarPick')} ref={rootRef}>
+    <div className="cropper" role="dialog" aria-modal="true" aria-label={t('creator.usePhoto')} ref={rootRef}>
       <div className="cropper__preview" onWheel={onWheel}>
         <div
           ref={previewRef}
@@ -177,7 +177,13 @@ export default function AvatarCropper({ onCommit, onCancel }) {
         >
           <div className="cropper__ring" aria-hidden="true" />
         </div>
-        <input className="cropper__file" type="file" accept={ACCEPTED_TYPES.join(',')} aria-label={t('join.avatarPick')} onChange={onInput} />
+        <input
+          className="cropper__file"
+          type="file"
+          accept={ACCEPTED_TYPES.join(',')}
+          aria-label={t('creator.usePhoto')}
+          onChange={onInput}
+        />
       </div>
 
       <label className="cropper__zoom">
@@ -199,7 +205,10 @@ export default function AvatarCropper({ onCommit, onCancel }) {
 
       {error && <p className="cropper__error">{t(`avatar.error.${error}`)}</p>}
       <p className="cropper__hint">
-        {t('avatar.limit', { type: ACCEPTED_TYPES.join(' '), max: `${Math.round(MAX_AVATAR_BYTES / 1024 / 1024)}MB` })}
+        {t('avatar.limit', {
+          type: ACCEPTED_TYPES.join(' '),
+          max: `${Math.round(MAX_AVATAR_BYTES / 1024 / 1024)}MB`
+        })}
       </p>
 
       <div className="cropper__actions">

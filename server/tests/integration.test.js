@@ -56,8 +56,7 @@ describe('server cross-view privacy + mixed hand', () => {
       socket.on('connect_error', reject);
     });
 
-  const ack = (socket, event, payload = {}) =>
-    new Promise((resolve) => socket.emit(event, payload, resolve));
+  const ack = (socket, event, payload = {}) => new Promise((resolve) => socket.emit(event, payload, resolve));
 
   it('live player never sees the bot cards, but a spectator does — same hand; chips conserved', async () => {
     const tableId = `xview-${Date.now()}`;

@@ -16,9 +16,20 @@ const SHARED_SFX = {
 const PROFILES = {
   easy: {
     difficulty: 'easy',
-    aggression: 0.35,
+    // Loose-passive "calling station": plays too many hands, calls too much,
+    // rarely raises, and misjudges hands now and then.
+    style: 'loose-passive',
+    looseness: 0.75,
+    aggression: 0.25,
     callThreshold: 0.18,
-    bluffFreq: 0.35,
+    bluffFreq: 0.05,
+    cbet: 0.3,
+    callDown: 0.14,
+    callMargin: 0,
+    rangeRespect: 0,
+    rangeRespectPre: 0.3,
+    slowplay: 0.25,
+    noise: 0.12,
     mcIterations: 120,
     opponents: 3,
     positionMultipliers: { button: 1.05, cutoff: 1.0, middle: 1.0, early: 0.9 },
@@ -31,10 +42,20 @@ const PROFILES = {
   },
   normal: {
     difficulty: 'normal',
-    aggression: 0.55,
+    // Solid, straightforward player.
+    style: 'solid',
+    looseness: 0.45,
+    aggression: 0.5,
     callThreshold: 0.28,
-    bluffFreq: 0.15,
-    mcIterations: 200,
+    bluffFreq: 0.08,
+    cbet: 0.55,
+    callDown: 0.04,
+    callMargin: 0.02,
+    rangeRespect: 0.12,
+    rangeRespectPre: 0.6,
+    slowplay: 0.12,
+    noise: 0.05,
+    mcIterations: 300,
     opponents: 3,
     positionMultipliers: { button: 1.1, cutoff: 1.05, middle: 1.0, early: 0.95 },
     opponentWeights: { aggression: 0.3, frequency: 0.3 },
@@ -46,10 +67,21 @@ const PROFILES = {
   },
   hard: {
     difficulty: 'hard',
-    aggression: 0.7,
+    // Tight-aggressive: disciplined ranges, position-aware, bets for value,
+    // bluffs in good spots, respects strong betting.
+    style: 'tight-aggressive',
+    looseness: 0.52,
+    aggression: 0.85,
     callThreshold: 0.34,
-    bluffFreq: 0.2,
-    mcIterations: 600,
+    bluffFreq: 0.13,
+    cbet: 0.68,
+    callDown: 0,
+    callMargin: 0.03,
+    rangeRespect: 0.2,
+    rangeRespectPre: 0.75,
+    slowplay: 0.12,
+    noise: 0.015,
+    mcIterations: 700,
     opponents: 4,
     positionMultipliers: { button: 1.15, cutoff: 1.08, middle: 1.0, early: 0.92 },
     opponentWeights: { aggression: 0.5, frequency: 0.5 },
@@ -70,6 +102,31 @@ export const DIFFICULTIES = Object.keys(PROFILES);
 export function getProfile(difficulty) {
   const key = String(difficulty || 'normal').toLowerCase();
   return PROFILES[key] || PROFILES.normal;
+}
+
+/**
+ * Small, stable personality tweaks so two CPUs of the same difficulty do not
+ * play identically. Seeded by the player's name.
+ */
+export function personaFor(profile, name) {
+  if (!name) return profile;
+  let h = 2166136261;
+  for (let i = 0; i < name.length; i += 1) h = Math.imul(h ^ name.charCodeAt(i), 16777619);
+  const unit = (shift) => (((h >>> shift) & 0xff) / 255) * 2 - 1; // -1..1
+  const clamp = (v) => Math.min(0.95, Math.max(0.05, v));
+  return {
+    ...profile,
+    looseness: clamp(profile.looseness + unit(0) * 0.1),
+    aggression: clamp(profile.aggression + unit(8) * 0.12),
+    bluffFreq: Math.max(0, profile.bluffFreq + unit(16) * 0.04)
+  };
+}
+
+/** Plain-language label for a CPU's playing style. */
+export function styleLabel(profile) {
+  const loose = profile.looseness >= 0.5;
+  const aggro = profile.aggression >= 0.5;
+  return `${loose ? 'loose' : 'tight'}-${aggro ? 'aggressive' : 'passive'}`;
 }
 
 /** Deterministic name pick for a new bot (uses an injected Rng for stability). */

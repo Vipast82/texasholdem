@@ -75,7 +75,12 @@ describe('mergeProfile / serializeProfile / deserializeProfile', () => {
 describe('buildSessionSnapshot', () => {
   it('records a win with the local payout', () => {
     const s = buildSessionSnapshot(
-      { winnerIds: ['me'], payouts: { me: 420 }, reason: 'showdown', snapshot: { handNumber: 7, tableId: 't1' } },
+      {
+        winnerIds: ['me'],
+        payouts: { me: 420 },
+        reason: 'showdown',
+        snapshot: { handNumber: 7, tableId: 't1' }
+      },
       'me',
       't1'
     );
@@ -121,12 +126,7 @@ describe('AutosaveService', () => {
 
   it('recordHandEnd bumps handCount and stores lastSession', async () => {
     const svc = new AutosaveService({ kv: memoryKV() });
-    const p = await svc.recordHandEnd(
-      { name: 'Bo' },
-      { winnerIds: ['Bo'], payouts: { Bo: 55 } },
-      'Bo',
-      't9'
-    );
+    const p = await svc.recordHandEnd({ name: 'Bo' }, { winnerIds: ['Bo'], payouts: { Bo: 55 } }, 'Bo', 't9');
     expect(p.handCount).toBe(1);
     expect(p.lastSession.won).toBe(true);
     expect(p.lastSession.myPayout).toBe(55);

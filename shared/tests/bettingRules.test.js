@@ -1,11 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  limitBetSize,
-  maxRaisesPerStreet,
-  maxBet,
-  minRaise,
-  validateAction
-} from '../src/bettingRules.js';
+import { limitBetSize, maxRaisesPerStreet, maxBet, minRaise, validateAction } from '../src/bettingRules.js';
 
 describe('limitBetSize', () => {
   it('preflop = BB', () => {

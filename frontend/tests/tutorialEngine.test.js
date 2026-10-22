@@ -249,10 +249,14 @@ describe('TutorialEngine', () => {
       hintProvider: hint,
       resolveText
     });
-    const item = engine.handleEvent('actionTaken', { action: 'bet' }, {
-      game: { pot: 10 },
-      actorId: 'p1'
-    });
+    const item = engine.handleEvent(
+      'actionTaken',
+      { action: 'bet' },
+      {
+        game: { pot: 10 },
+        actorId: 'p1'
+      }
+    );
     expect(item.title).toBe('BET!');
     expect(item.message).toBe('normal bet');
     expect(item.strategyHint.reason).toBe('tight play');

@@ -23,7 +23,12 @@ function totalCommitted(p) {
  */
 export class GameTable {
   constructor(config = {}) {
-    if (!config.smallBlind || !config.bigBlind || config.smallBlind <= 0 || config.bigBlind <= config.smallBlind) {
+    if (
+      !config.smallBlind ||
+      !config.bigBlind ||
+      config.smallBlind <= 0 ||
+      config.bigBlind <= config.smallBlind
+    ) {
       throw new Error('invalid blinds: need smallBlind>0 and bigBlind>smallBlind');
     }
     this.tableId = config.tableId || 'table-1';
@@ -101,6 +106,7 @@ export class GameTable {
       holeCards: null,
       isAllIn: false,
       hasFolded: false,
+      sittingOut: false,
       contributions: { preflop: 0, flop: 0, turn: 0, river: 0 }
     };
     this.players.push(player);
@@ -149,9 +155,7 @@ export class GameTable {
    */
   resolveOrphanedHand() {
     if (!this.inHand) return;
-    const stillIn = this.players.filter(
-      (p) => p.status === 'in-hand' && !p.hasFolded
-    );
+    const stillIn = this.players.filter((p) => p.status === 'in-hand' && !p.hasFolded);
     if (stillIn.length >= 2) return; // hand can continue with 2+ players
     const pot = this.pot;
     const payouts = {};
@@ -176,8 +180,61 @@ export class GameTable {
     return p.chips;
   }
 
+  /** Sit out (skip the next deals) or come back. Takes effect from the next hand. */
+  setSittingOut(id, out) {
+    const p = this.playerById(id);
+    if (!p) throw new Error(`unknown player ${id}`);
+    p.sittingOut = !!out;
+    return p.sittingOut;
+  }
+
+  /** Change the blinds between hands (tournament levels, table settings). */
+  setBlinds(smallBlind, bigBlind) {
+    if (this.inHand) throw new Error('blinds can only change between hands');
+    if (!(smallBlind > 0) || !(bigBlind > smallBlind)) throw new Error('invalid blinds');
+    this.smallBlind = Math.round(smallBlind);
+    this.bigBlind = Math.round(bigBlind);
+  }
+
   playerById(id) {
     return this.players.find((p) => p.id === id);
+  }
+
+  /**
+   * Main pot and side pots as they stand right now (folded players' chips stay
+   * in the pots they paid into). Each pot lists how many live players can win it.
+   */
+  currentPots() {
+    if (!this.inHand) return [];
+    const commitments = [
+      ...this.players.filter((p) => this.activePlayers.includes(p.id)).map((p) => totalCommitted(p)),
+      ...this._departed.map((d) => d.committed)
+    ];
+    const live = this.playersStillIn();
+    // Pots only split where a live player is all in: each all-in amount caps
+    // a pot, and everything above the last cap is one pot for whoever is left.
+    const caps = [...new Set(live.filter((p) => p.isAllIn).map((p) => totalCommitted(p)))].sort(
+      (x, y) => x - y
+    );
+    const pots = [];
+    let prev = 0;
+    const add = (amount, contenders) => {
+      if (amount <= 0) return;
+      // A pot only one player can win is just their uncalled chips: fold it
+      // into the pot below rather than calling it a side pot.
+      if (contenders < 2 && pots.length) pots[pots.length - 1].amount += amount;
+      else pots.push({ amount, contenders });
+    };
+    for (const cap of caps) {
+      const amount = commitments.reduce((sum, c) => sum + Math.max(0, Math.min(c, cap) - prev), 0);
+      add(amount, live.filter((p) => !p.isAllIn || totalCommitted(p) >= cap).length);
+      prev = cap;
+    }
+    add(
+      commitments.reduce((sum, c) => sum + Math.max(0, c - prev), 0),
+      live.filter((p) => !p.isAllIn || totalCommitted(p) > prev).length
+    );
+    return pots;
   }
 
   // ---------------------------------------------------------------- helpers
@@ -217,7 +274,7 @@ export class GameTable {
   /** Begin a new hand. Emits handStarted, blindsPosted, holeDealt. */
   startHand() {
     if (this.inHand) throw new Error('a hand is already in progress');
-    const active = this.players.filter((p) => p.status === 'seated' && p.chips > 0);
+    const active = this.players.filter((p) => p.status === 'seated' && p.chips > 0 && !p.sittingOut);
     if (active.length < 2) throw new Error('need at least 2 players with chips to start a hand');
 
     this.handNumber += 1;
@@ -437,7 +494,8 @@ export class GameTable {
         const increment = newBetLevel - this.currentBet;
         // A short all-in that is less than a full raise does not lower the
         // minimum raise for the next player and does not count as a raise.
-        const fullRaise = this.currentBet === 0 || increment >= Math.max(this.lastRaiseIncrement, this.bigBlind);
+        const fullRaise =
+          this.currentBet === 0 || increment >= Math.max(this.lastRaiseIncrement, this.bigBlind);
         if (fullRaise) {
           this.lastRaiseIncrement = increment;
           this.raiseCount += 1;
@@ -522,7 +580,11 @@ export class GameTable {
     const stillIn = this.playersStillIn();
     const hands = {};
     for (const p of stillIn) hands[p.id] = p.holeCards;
-    const result = showdown(hands, this.community, stillIn.map((p) => p.id));
+    const result = showdown(
+      hands,
+      this.community,
+      stillIn.map((p) => p.id)
+    );
 
     const orderWinners = (ids) => {
       const seats = ids.map((id) => this.playerById(id).seat).sort((a, b) => a - b);
@@ -551,7 +613,9 @@ export class GameTable {
         continue;
       }
       const best = eligible.reduce((a, b) => (compareRanked(result.all[b], result.all[a]) > 0 ? b : a));
-      const winners = orderWinners(eligible.filter((id) => compareRanked(result.all[id], result.all[best]) === 0));
+      const winners = orderWinners(
+        eligible.filter((id) => compareRanked(result.all[id], result.all[best]) === 0)
+      );
       for (const [id, share] of Object.entries(distributePot(pot.amount + carry, winners))) {
         payouts[id] = (payouts[id] || 0) + share;
       }
@@ -593,18 +657,22 @@ export class GameTable {
   /**
    * Who may reveal their hole cards in a given view, for LIVE players.
    *
-   * HARD PRIVACY RULE: a live player can only ever see THEIR OWN hole cards —
-   * both during betting and after the hand ends. The showdown result is
-   * communicated via `lastShowdown` (winnerIds / ranked / all), NOT by
-   * exposing other players' hole cards over the wire. Spectators (revealAll)
-   * are the only exception and may see every card.
+   * PRIVACY RULE: while a hand is being played a live player only ever sees
+   * THEIR OWN hole cards. Once the hand ends at a showdown, the hands that
+   * reached it are shown to everyone (folded and uncontested hands never
+   * are). Spectators with "show all" (revealAll) may see every card.
    *
    * @returns {(player:object)=>boolean} predicate
    */
   _revealPredicate(viewerId, revealAll) {
     if (revealAll) return () => true; // spectator: every card
-    // Only the viewer's own cards are ever visible to a live player.
-    return (p) => p.id === viewerId;
+    // After a showdown, every hand that reached it is turned face up (as at a
+    // real table). Folded hands and hands won uncontested stay hidden.
+    const shown =
+      this.street === 'ended' && this.lastShowdown && this.lastShowdown.all
+        ? new Set(Object.keys(this.lastShowdown.all))
+        : null;
+    return (p) => p.id === viewerId || (shown !== null && shown.has(p.id));
   }
 
   snapshotFor(viewerId, options = {}) {
@@ -624,6 +692,7 @@ export class GameTable {
       lastRaiseIncrement: this.lastRaiseIncrement,
       raiseCount: this.raiseCount,
       pot: this.pot,
+      pots: this.currentPots(),
       dealerSeat: this.dealerSeat,
       nextActorId: this.nextActorId(),
       streetComplete: this.streetComplete,
@@ -642,6 +711,7 @@ export class GameTable {
         status: p.status,
         hasFolded: p.hasFolded,
         isAllIn: p.isAllIn,
+        sittingOut: !!p.sittingOut,
         toAct: !!p.toAct,
         contributions: p.contributions,
         holeCards: mayReveal(p) ? p.holeCards : null

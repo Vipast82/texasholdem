@@ -50,10 +50,17 @@ const TABLE_STATE = () => ({
   actions: {}, // playerId -> { action, amount } for the current street
   spectator: { ...SPECTATOR_DEFAULTS },
   history: { ...HISTORY_DEFAULTS },
-  emotes: {}
+  emotes: {},
+  snapshotAt: 0, // local time the last snapshot arrived (for countdowns)
+  toasts: [],
+  preAction: null // { kind: 'checkfold' | 'check' | 'callany', hand, street, bet }
 });
 
+let toastSeq = 0;
+
 const initialState = {
+  // Table-scoped fields first, so every one of them always has a value.
+  ...TABLE_STATE(),
   connected: false,
   tableId: null,
   playerId: null,
@@ -96,8 +103,7 @@ function handEndSoundForMe(payload, playerId) {
       ? [payload.winnerId]
       : [];
   const me =
-    payload.snapshot &&
-    Array.isArray(payload.snapshot.players)
+    payload.snapshot && Array.isArray(payload.snapshot.players)
       ? payload.snapshot.players.find((p) => p.id === playerId)
       : null;
   const participated = me && (me.hasFolded || me.holeCards || me.contributions);
@@ -109,7 +115,45 @@ export const useGameStore = create((set, get) => ({
   ...initialState,
 
   // ---- socket events
-  _onState: (snapshot) => set({ snapshot, error: null }),
+  _onState: (snapshot) => {
+    const prev = get().snapshot;
+    const me = get().playerId;
+    // A gentle "your turn" cue when the action comes round to you.
+    if (me && snapshot.inHand && snapshot.nextActorId === me && (!prev || prev.nextActorId !== me)) {
+      try {
+        sfxService.play('turn');
+      } catch (err) {
+        // sound is best-effort
+      }
+    }
+    // Count a tournament win once, in the lifetime record.
+    const tour = snapshot.tournament;
+    if (tour && tour.finished && tour.standings && tour.standings[0] && tour.standings[0].id === me) {
+      const key = `${snapshot.tableId}:${snapshot.handNumber}`;
+      if (get()._tourCounted !== key) {
+        const stats = get().profile.stats || {};
+        get().saveProfile({ stats: { ...stats, tournamentsWon: (stats.tournamentsWon || 0) + 1 } });
+        set({ _tourCounted: key });
+      }
+    }
+    set({ snapshot, snapshotAt: Date.now(), error: null });
+  },
+  _onNotice: ({ key, vars }) => {
+    if (!key) return;
+    toastSeq += 1;
+    const id = toastSeq;
+    set((s) => ({ toasts: [...s.toasts, { id, key, vars: vars || {} }].slice(-4) }));
+    setTimeout(() => set((s) => ({ toasts: s.toasts.filter((x) => x.id !== id) })), 4500);
+  },
+  /** Queue (or clear) an action to take automatically when your turn comes. */
+  setPreAction(kind) {
+    const snap = get().snapshot;
+    if (!kind || !snap) return set({ preAction: null });
+    set({ preAction: { kind, hand: snap.handNumber, street: snap.street, bet: snap.currentBet } });
+  },
+  dismissToast(id) {
+    set((s) => ({ toasts: s.toasts.filter((x) => x.id !== id) }));
+  },
   _onChat: (msg) => set((s) => ({ chat: [...s.chat, msg].slice(-100) })),
   _onBotAction: ({ playerId, action, reason, confidence }) =>
     set((s) => ({
@@ -144,8 +188,7 @@ export const useGameStore = create((set, get) => ({
           if (s) sfxService.play(s);
           // Sprint 6 — auto emote for the LOCAL player (cheer on win, sad on all-in loss)
           const meP =
-            payload.snapshot &&
-            Array.isArray(payload.snapshot.players)
+            payload.snapshot && Array.isArray(payload.snapshot.players)
               ? payload.snapshot.players.find((p) => p.id === me)
               : null;
           const winners = Array.isArray(payload.winnerIds)
@@ -217,6 +260,7 @@ export const useGameStore = create((set, get) => ({
     socket.on('gameEvent', this._onGameEvent);
     socket.on('handRecord', this._onHandRecord);
     socket.on('emote', this._onEmote);
+    socket.on('notice', this._onNotice);
     socket.on('connect_error', this._onError);
   },
 
@@ -235,8 +279,24 @@ export const useGameStore = create((set, get) => ({
   },
 
   async join(tableId, name, options = {}) {
-    const { isBot = false, bot = null, spawnBot = false, botDifficulty = 'normal', avatarMeta = null } = options;
-    const res = await emitAck('joinTable', { tableId, name, isBot, bot, spawnBot, botDifficulty, avatarMeta });
+    const {
+      isBot = false,
+      bot = null,
+      spawnBot = false,
+      botDifficulty = 'normal',
+      avatarMeta = null,
+      options: tableOptions = null
+    } = options;
+    const res = await emitAck('joinTable', {
+      tableId,
+      name,
+      isBot,
+      bot,
+      spawnBot,
+      botDifficulty,
+      avatarMeta,
+      options: tableOptions
+    });
     if (!res.ok) {
       set({ error: res.error });
       return false;
@@ -269,6 +329,44 @@ export const useGameStore = create((set, get) => ({
     const res = await emitAck('rebuy');
     if (!res.ok) set({ error: res.error });
     return res;
+  },
+
+  /** Sit out (not dealt in / auto-fold) or come back. */
+  async sitOut(out) {
+    const res = await emitAck('sitOut', { out: !!out });
+    if (!res.ok) set({ error: res.error });
+    return res;
+  },
+
+  /** Start a new tournament at this table once the last one has finished. */
+  async restartTournament() {
+    const res = await emitAck('restartTournament');
+    if (!res.ok) set({ error: res.error });
+    return res;
+  },
+
+  /** Table appearance (felt colour, four-colour deck), saved in the profile. */
+  setAppearance(partial = {}) {
+    const settings = { ...get().profile.settings, ...partial };
+    get().saveProfile({ settings });
+  },
+
+  /**
+   * Save a character-creator look and use it at the table. A character and an
+   * uploaded picture are alternatives, so choosing a character drops the picture.
+   */
+  async setLook(look) {
+    if (get().avatar.id) await get().resetAvatar();
+    get().saveProfile({ look });
+    get().updateAvatar(look ? { kind: 'character', look } : null);
+  },
+
+  /** The small avatar description that goes over the wire at join time. */
+  avatarMetaForJoin() {
+    const { avatar, profile } = get();
+    if (avatar.id) return { avatarId: avatar.id, kind: 'upload', crop: avatar.crop || null };
+    if (profile.look) return { kind: 'character', look: profile.look };
+    return null;
   },
 
   /** Remove an AI player (only bots can be removed; blocked mid-hand). */

@@ -1,27 +1,33 @@
 import { useState } from 'react';
 import { useGameStore } from '../store.js';
 import { t } from '../i18n.js';
-import AvatarCropper from './AvatarCropper.jsx';
-import { characterSvg } from '../services/characterArt.js';
+import { FELTS } from '../services/autosave.js';
+import { avatarPreviewSrc } from '../services/characterArt.js';
+import AvatarCreator from './AvatarCreator.jsx';
 
-/** Language, sound and table picture. All state lives in the store. */
+const FELT_SWATCH = {
+  green: '#1d6044',
+  blue: '#1d4a72',
+  red: '#70241d',
+  purple: '#4a2b66',
+  black: '#262624'
+};
+
+/** Language, sound, table appearance and your character. */
 export default function SettingsPanel() {
   const sfx = useGameStore((s) => s.sfx);
   const setSfx = useGameStore((s) => s.setSfx);
   const avatar = useGameStore((s) => s.avatar);
   const avatarBusy = useGameStore((s) => s.avatarBusy);
   const avatarError = useGameStore((s) => s.avatarError);
-  const commitAvatar = useGameStore((s) => s.commitAvatar);
   const resetAvatar = useGameStore((s) => s.resetAvatar);
   const locale = useGameStore((s) => s.tutorial.locale);
   const setLocale = useGameStore((s) => s.setLocale);
+  const settings = useGameStore((s) => s.profile.settings);
+  const look = useGameStore((s) => s.profile.look);
+  const setAppearance = useGameStore((s) => s.setAppearance);
   const playerName = useGameStore((s) => s.name || s.profile.name || 'Gunslinger');
-  const [cropping, setCropping] = useState(false);
-
-  const onCommit = async (file, crop, dims) => {
-    const meta = await commitAvatar(file, crop, dims);
-    if (meta) setCropping(false);
-  };
+  const [editing, setEditing] = useState(false);
 
   return (
     <section className="settings" aria-label={t('settings.title')}>
@@ -57,41 +63,63 @@ export default function SettingsPanel() {
       </fieldset>
 
       <fieldset className="group">
-        <legend>{t('settings.avatar')}</legend>
-        {cropping ? (
-          <AvatarCropper onCommit={onCommit} onCancel={() => setCropping(false)} />
-        ) : (
-          <div className="settings__avatar">
-            {avatar.url ? (
-              <span
-                className="join__avatarimg"
-                style={{ backgroundImage: `url("${avatar.url}")` }}
-                aria-hidden="true"
+        <legend>{t('settings.table')}</legend>
+        <div className="creator__row" role="radiogroup" aria-label={t('settings.felt')}>
+          <span className="choice__label">{t('settings.felt')}</span>
+          <div className="swatches">
+            {FELTS.map((felt) => (
+              <button
+                key={felt}
+                type="button"
+                role="radio"
+                aria-checked={settings.felt === felt}
+                aria-label={t(`settings.felt.${felt}`)}
+                title={t(`settings.felt.${felt}`)}
+                className={`swatch${settings.felt === felt ? ' swatch--on' : ''}`}
+                style={{ background: FELT_SWATCH[felt] }}
+                onClick={() => setAppearance({ felt })}
               />
-            ) : (
-              <span
-                className="join__avatarimg"
-                style={{ backgroundImage: `url("${characterSvg(playerName)}")` }}
-                aria-hidden="true"
-              />
-            )}
-            <button
-              type="button"
-              className="btn btn--ghost btn--sm"
-              disabled={avatarBusy}
-              onClick={() => setCropping(true)}
-            >
-              {avatar.id ? t('settings.avatarChange') : t('settings.avatarPick')}
-            </button>
-            {avatar.id && (
-              <button type="button" className="linkbtn" disabled={avatarBusy} onClick={() => resetAvatar()}>
-                {t('settings.avatarReset')}
-              </button>
-            )}
+            ))}
           </div>
-        )}
+        </div>
+        <label className="toggle">
+          <input
+            type="checkbox"
+            checked={settings.fourColor}
+            onChange={(e) => setAppearance({ fourColor: e.target.checked })}
+          />
+          <span>
+            {t('settings.fourColor')}
+            <small>{t('settings.fourColorHelp')}</small>
+          </span>
+        </label>
+      </fieldset>
+
+      <fieldset className="group">
+        <legend>{t('settings.avatar')}</legend>
+        <div className="settings__avatar">
+          <span
+            className="join__avatarimg"
+            style={{ backgroundImage: `url("${avatar.url || avatarPreviewSrc(playerName, look)}")` }}
+            aria-hidden="true"
+          />
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm"
+            disabled={avatarBusy}
+            onClick={() => setEditing(true)}
+          >
+            {t('creator.edit')}
+          </button>
+          {avatar.id && (
+            <button type="button" className="linkbtn" disabled={avatarBusy} onClick={() => resetAvatar()}>
+              {t('settings.avatarReset')}
+            </button>
+          )}
+        </div>
         {avatarError && <p className="field__error">{t('avatar.error.generic')}</p>}
       </fieldset>
+      {editing && <AvatarCreator name={playerName} onClose={() => setEditing(false)} />}
     </section>
   );
 }

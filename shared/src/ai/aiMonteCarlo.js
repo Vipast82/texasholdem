@@ -1,6 +1,6 @@
-import { parseCard } from '../cards.js';
-import { evaluateBest, compareRanked } from '../handEvaluator.js';
-import { Rng, createShuffledDeck } from '../rng.js';
+import { DECK, parseCard } from '../cards.js';
+import { rankCards, compareFast } from '../fastEval.js';
+import { Rng } from '../rng.js';
 
 /**
  * Deterministic Monte-Carlo win/tie/lose estimator.
@@ -36,30 +36,40 @@ export function estimateWinTieLose(hole, community, seed, iterations = 300, oppo
   // A single seeded generator drives the whole estimate, so the full run is
   // reproducible given (hole, board, seed).
   const master = new Rng(`${seed}:${hole.join('')}:${board.join('')}`);
+  const unknown = DECK.filter((c) => !used.has(c));
+  const need = needBoard + opponents * 2;
+  if (unknown.length < need) return { win: 0, tie: 0, lose: 0, confidence: 0 };
   let wins = 0;
   let ties = 0;
   let losses = 0;
   let played = 0;
+  const dealtBoard = board.slice();
+  const mine = hole.concat(board);
 
   for (let i = 0; i < iterations; i += 1) {
-    // Unknown-card deck: a full shuffle minus the cards we already know.
-    const unknown = createShuffledDeck(master.nextInt(2147483647)).filter((c) => !used.has(c));
-    if (unknown.length < needBoard + opponents * 2) continue; // cannot complete
-
-    const dealtBoard = board.concat(unknown.slice(0, needBoard));
-    const myBest = evaluateBest([...dealtBoard, ...hole]);
+    // Partial Fisher-Yates: only shuffle the cards this deal actually needs.
+    for (let k = 0; k < need; k += 1) {
+      const j = k + master.nextInt(unknown.length - k);
+      const tmp = unknown[k];
+      unknown[k] = unknown[j];
+      unknown[j] = tmp;
+    }
+    dealtBoard.length = board.length;
+    mine.length = 2 + board.length;
+    for (let k = 0; k < needBoard; k += 1) {
+      dealtBoard.push(unknown[k]);
+      mine.push(unknown[k]);
+    }
+    const myBest = rankCards(mine);
 
     let lost = false;
     let tied = false;
-    let oppStart = needBoard;
-    for (let o = 0; o < opponents; o += 1) {
-      const oc1 = unknown[oppStart];
-      const oc2 = unknown[oppStart + 1];
-      oppStart += 2;
-      const oppBest = evaluateBest([...dealtBoard, oc1, oc2]);
-      const cmp = compareRanked(myBest, oppBest);
+    for (let o = 0; o < opponents && !lost; o += 1) {
+      const at = needBoard + o * 2;
+      const oppBest = rankCards([unknown[at], unknown[at + 1], ...dealtBoard]);
+      const cmp = compareFast(myBest, oppBest);
       if (cmp < 0) lost = true;
-      if (cmp === 0) tied = true;
+      else if (cmp === 0) tied = true;
     }
     if (lost) losses += 1;
     else if (tied) ties += 1;

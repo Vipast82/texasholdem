@@ -4,6 +4,8 @@ import { parseDisplayCard } from '../cardUtils.js';
 import { useGameStore } from '../store.js';
 import { t, getLocale } from '../i18n.js';
 import { stadiumPath, seatSpots } from '../tableGeometry.js';
+import { useNow, remainingMs } from '../hooks.js';
+import { sfxService } from '../services/sfxService.js';
 import HudOdds from './HudOdds.jsx';
 import DealerButton from './DealerButton.jsx';
 import SeatAvatar from './SeatAvatar.jsx';
@@ -67,8 +69,12 @@ function runoutSettleMs(from) {
 
 export function Card({ card, size = 'md', className = '', style }) {
   const { rank, suit, isRed } = parseDisplayCard(card);
+  const suitClass = `card--${card.slice(-1)}`;
   return (
-    <div className={`card card--${size} ${isRed ? 'card--red' : 'card--black'} ${className}`} style={style}>
+    <div
+      className={`card card--${size} ${isRed ? 'card--red' : 'card--black'} ${suitClass} ${className}`}
+      style={style}
+    >
       <span className="card__corner">
         <span className="card__rank">{rank}</span>
         <span className="card__pip">{suit}</span>
@@ -82,8 +88,18 @@ function CardBack({ size = 'sm', className = '' }) {
   return <div className={`card card--${size} card--back ${className}`} aria-hidden="true" />;
 }
 
+/** Felt colour choices: [centre, middle, edge] of the radial gradient. */
+const FELT_COLORS = {
+  green: ['#2f8a5f', '#1d6044', '#0f3a29'],
+  blue: ['#2f6f9f', '#1d4a72', '#0e2a45'],
+  red: ['#9c3a31', '#70241d', '#40120e'],
+  purple: ['#6b4290', '#4a2b66', '#29163a'],
+  black: ['#3c3c3a', '#262624', '#121211']
+};
+
 /** The table drawn as layered SVG: shadow, wooden apron, leather rail, brass studs, felt. */
-function TableArt({ w, h }) {
+function TableArt({ w, h, felt: feltName = 'green' }) {
+  const [c0, c1, c2] = FELT_COLORS[feltName] || FELT_COLORS.green;
   const rail = Math.max(14, Math.min(w, h) * 0.065);
   const apron = Math.max(6, h * 0.028);
   const outer = stadiumPath(w, h - apron, 0);
@@ -101,9 +117,9 @@ function TableArt({ w, h }) {
     >
       <defs>
         <radialGradient id="felt" cx="50%" cy="42%" r="65%">
-          <stop offset="0%" stopColor="#2f8a5f" />
-          <stop offset="55%" stopColor="#1d6044" />
-          <stop offset="100%" stopColor="#0f3a29" />
+          <stop offset="0%" stopColor={c0} />
+          <stop offset="55%" stopColor={c1} />
+          <stop offset="100%" stopColor={c2} />
         </radialGradient>
         <linearGradient id="rail" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="#5a3820" />
@@ -167,7 +183,24 @@ function TableArt({ w, h }) {
   );
 }
 
+/** Shot clock: a ring around the acting player's portrait that runs down. */
+function TurnRing({ remaining, total }) {
+  const from = Math.min(100, Math.max(0, (1 - remaining / total) * 100));
+  return (
+    <svg className="turnring" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+      <circle
+        cx="50"
+        cy="50"
+        r="47"
+        pathLength="100"
+        style={{ '--from': from, animationDuration: `${remaining}ms` }}
+      />
+    </svg>
+  );
+}
+
 function seatStatus(player, snapshot, lastAction) {
+  if (player.sittingOut) return t('seat.sittingOut');
   if (player.chips === 0 && !player.isAllIn && player.status !== 'in-hand') return t('seat.busted');
   if (!snapshot.inHand) return null;
   if (player.hasFolded) return t('seat.folded');
@@ -188,7 +221,9 @@ function Seat({
   emote,
   highlight,
   onRemoveBot,
-  avatarSize
+  avatarSize,
+  turn,
+  shownHand
 }) {
   const inHand = player.status === 'in-hand';
   const folded = player.hasFolded && snapshot.inHand;
@@ -221,6 +256,7 @@ function Seat({
           </span>
         )}
         {isDealer && <DealerButton active seat={player.name} />}
+        {turn && <TurnRing key={turn.key} remaining={turn.remaining} total={turn.total} />}
       </div>
 
       {dealtIn && !folded && (
@@ -245,7 +281,10 @@ function Seat({
           {player.isBot && (
             <span
               className="seat__bot"
-              title={t('seat.botTitle', { difficulty: (player.bot && player.bot.difficulty) || 'normal' })}
+              title={t('seat.botTitle', {
+                difficulty: t(`difficulty.${(player.bot && player.bot.difficulty) || 'normal'}`),
+                style: t(`style.${(player.bot && player.bot.style) || 'tight-aggressive'}`)
+              })}
             >
               {t('seat.cpu')}
             </span>
@@ -265,11 +304,9 @@ function Seat({
         )}
       </div>
 
-      {winAmount > 0 ? (
-        <span className="seat__tag seat__tag--win">+{winAmount.toLocaleString()}</span>
-      ) : (
-        status && <span className="seat__tag">{status}</span>
-      )}
+      {winAmount > 0 && <span className="seat__tag seat__tag--win">+{winAmount.toLocaleString()}</span>}
+      {shownHand && <span className="seat__tag seat__tag--hand">{shownHand}</span>}
+      {!winAmount && !shownHand && status && <span className="seat__tag">{status}</span>}
       <HudOdds snapshot={snapshot} playerId={player.id} />
     </div>
   );
@@ -294,12 +331,104 @@ function resultText(snapshot) {
   return t('table.wins', { name: names, n: total.toLocaleString() });
 }
 
+/**
+ * Chips in motion: when a betting round closes, each bet slides into the pot;
+ * when the hand is decided, the pot slides to the winner(s). Returns the
+ * flights to draw (each plays a short CSS animation and then expires).
+ */
+function useChipFlights(snapshot, players, spots, pot, payouts, settled) {
+  const [flights, setFlights] = useState([]);
+  const roundKey = `${snapshot.handNumber}:${snapshot.street}`;
+  const winners = Object.keys(payouts).filter((id) => payouts[id] > 0);
+  const payKey = settled && winners.length ? `${snapshot.handNumber}:paid` : null;
+
+  // The latest positions, read by the effects below when a round closes.
+  const latestRef = useRef(null);
+  const betsRef = useRef({ key: null, bets: [] });
+  const paidRef = useRef(null);
+  useEffect(() => {
+    latestRef.current = { players, spots, pot, payouts };
+    const bets = players
+      .map((p, i) => ({
+        id: p.id,
+        amount: (p.contributions && p.contributions[snapshot.street]) || 0,
+        x: spots[i] ? spots[i].betX : 0,
+        y: spots[i] ? spots[i].betY : 0
+      }))
+      .filter((bet) => snapshot.inHand && bet.amount > 0);
+    if (betsRef.current.key === roundKey) betsRef.current.bets = bets;
+  });
+
+  // A betting round closed: last round's bets slide into the pot.
+  useEffect(() => {
+    const last = betsRef.current;
+    const center = latestRef.current ? latestRef.current.pot : { x: 0, y: 0 };
+    betsRef.current = { key: roundKey, bets: [] };
+    if (!last.key || !last.bets.length) return undefined;
+    const batch = last.bets.map((bet) => ({
+      key: `in-${last.key}-${bet.id}`,
+      kind: 'in',
+      amount: bet.amount,
+      x0: bet.x,
+      y0: bet.y,
+      x1: center.x,
+      y1: center.y
+    }));
+    const show = setTimeout(() => setFlights((fl) => [...fl, ...batch]), 0);
+    const hide = setTimeout(() => setFlights((fl) => fl.filter((x) => !batch.includes(x))), 650);
+    return () => {
+      clearTimeout(show);
+      clearTimeout(hide);
+    };
+  }, [roundKey]);
+
+  // The hand is decided: the pot slides to the winner(s).
+  useEffect(() => {
+    if (!payKey || paidRef.current === payKey || !latestRef.current) return undefined;
+    paidRef.current = payKey;
+    const { players: ps, spots: sp, pot: center, payouts: pay } = latestRef.current;
+    const batch = Object.keys(pay)
+      .filter((id) => pay[id] > 0)
+      .map((id) => {
+        const i = ps.findIndex((p) => p.id === id);
+        if (i < 0 || !sp[i]) return null;
+        return {
+          key: `out-${payKey}-${id}`,
+          kind: 'out',
+          amount: pay[id],
+          x0: center.x,
+          y0: center.y,
+          x1: sp[i].x,
+          y1: sp[i].y
+        };
+      })
+      .filter(Boolean);
+    const show = setTimeout(() => {
+      setFlights((fl) => [...fl, ...batch]);
+      try {
+        sfxService.play('chips');
+      } catch (err) {
+        // sound is best-effort
+      }
+    }, 250);
+    const hide = setTimeout(() => setFlights((fl) => fl.filter((x) => !batch.includes(x))), 1250);
+    return () => {
+      clearTimeout(show);
+      clearTimeout(hide);
+    };
+  }, [payKey]);
+
+  return flights;
+}
+
 export default function Table({ snapshot }) {
   const playerId = useGameStore((s) => s.playerId);
   const actions = useGameStore((s) => s.actions);
   const spectator = useGameStore((s) => s.spectator);
   const emotes = useGameStore((s) => s.emotes);
   const removeBot = useGameStore((s) => s.removeBot);
+  const snapshotAt = useGameStore((s) => s.snapshotAt);
+  const felt = useGameStore((s) => s.profile.settings.felt);
   const boxRef = useRef(null);
   const { w, h } = useBoxSize(boxRef);
 
@@ -327,6 +456,14 @@ export default function Table({ snapshot }) {
   const highlight = ranked && Array.isArray(ranked.cards) ? new Set(ranked.cards) : null;
 
   const shuffling = useTransientFlag(handNum, 700);
+
+  // Countdowns (shot clock, next deal) tick locally from the last snapshot.
+  const now = useNow(!!(snapshot.turn || snapshot.nextHandIn != null));
+  const nextIn = remainingMs(snapshot.nextHandIn, snapshotAt, now);
+  const turnLeft = snapshot.turn ? remainingMs(snapshot.turn.remainingMs, snapshotAt, now) : null;
+  const turnKey = snapshot.turn
+    ? `${snapshot.turn.playerId}:${Math.round((snapshotAt + snapshot.turn.remainingMs) / 500)}`
+    : null;
   const meIndex = Math.max(
     0,
     players.findIndex((p) => p.id === playerId)
@@ -338,10 +475,19 @@ export default function Table({ snapshot }) {
   const compact = w < 640;
   const canRemoveBots = !snapshot.inHand && !spectator.active;
 
-  let message = ' ';
+  // Showdown: name every hand that was turned face up.
+  const shown = ended && settled && snapshot.lastShowdown && snapshot.lastShowdown.all;
+  const shownHandOf = (id) => (shown && shown[id] ? categoryName(shown[id].category, getLocale()) : null);
+
+  const potCenter = { x: w / 2, y: (h - apron) * 0.46 - Math.max(38, Math.min(w * 0.06, 80)) * 0.95 };
+  const flights = useChipFlights(snapshot, players, spots, potCenter, payouts, settled);
+
+  let message = '\u00a0';
   if (result) message = result;
   else if (snapshot.inHand) message = t(`street.${snapshot.street}`);
+  else if (nextIn != null) message = t('table.nextHand', { n: Math.ceil(nextIn / 1000) });
   else if (handNum === 0) message = t('table.firstHand');
+  const pots = Array.isArray(snapshot.pots) ? snapshot.pots : [];
 
   return (
     <div className={`table${compact ? ' table--compact' : ''}`}>
@@ -350,13 +496,22 @@ export default function Table({ snapshot }) {
         className={`table__box${shuffling ? ' table__box--shuffle' : ''}`}
         style={{ '--cw': `${Math.round(Math.max(w < 640 ? 30 : 38, Math.min(w * 0.06, 80)))}px` }}
       >
-        <TableArt w={w} h={h} />
+        <TableArt w={w} h={h} felt={felt} />
 
         <div className="table__center" style={{ top: (h - apron) * 0.46 }}>
           <div className={`table__pot${snapshot.pot > 0 ? '' : ' table__pot--empty'}`} aria-live="polite">
             <span className="table__potchip" aria-hidden="true" />
             {t('table.pot', { n: snapshot.pot.toLocaleString() })}
           </div>
+          {pots.length > 1 && (
+            <div className="table__pots">
+              {pots.map((p, i) => (
+                <span key={i} className="table__sidepot">
+                  {t(i === 0 ? 'table.mainPot' : 'table.sidePot', { n: p.amount.toLocaleString() })}
+                </span>
+              ))}
+            </div>
+          )}
           <div className="table__board" role="group" aria-label={t('table.board')}>
             {Array.from({ length: 5 }).map((_, i) => {
               const card = community[i];
@@ -393,6 +548,17 @@ export default function Table({ snapshot }) {
           );
         })}
 
+        {flights.map((fl) => (
+          <div
+            key={fl.key}
+            className={`chipflight chipflight--${fl.kind}`}
+            style={{ '--x0': `${fl.x0}px`, '--y0': `${fl.y0}px`, '--x1': `${fl.x1}px`, '--y1': `${fl.y1}px` }}
+            aria-hidden="true"
+          >
+            <BetChips amount={fl.amount} denominations={snapshot.chipDenominations || DENOMS} />
+          </div>
+        ))}
+
         {players.map((p, i) => (
           <Seat
             key={p.id}
@@ -408,6 +574,12 @@ export default function Table({ snapshot }) {
             highlight={highlight}
             onRemoveBot={p.isBot && canRemoveBots ? removeBot : null}
             avatarSize={p.id === playerId ? (compact ? 44 : 64) : compact ? 36 : 52}
+            turn={
+              snapshot.turn && snapshot.turn.playerId === p.id && turnLeft != null
+                ? { key: turnKey, remaining: turnLeft, total: snapshot.turn.totalMs }
+                : null
+            }
+            shownHand={shownHandOf(p.id)}
           />
         ))}
       </div>

@@ -177,3 +177,96 @@ describe('GameTable invariants under random play', () => {
     expect(hands).toBeGreaterThan(500);
   });
 });
+
+describe('GameTable table features', () => {
+  it('hides other hands during play and shows showdown hands afterwards', () => {
+    const t = headsUp();
+    t.startHand();
+    const [a, b] = ['A', 'B'];
+    expect(t.snapshotFor(a).players.find((p) => p.id === b).holeCards).toBeNull();
+    while (t.inHand) {
+      const id = t.nextActorId();
+      const p = t.playerById(id);
+      t.applyAction(id, t.currentBet > p.contributions[t.street] ? 'call' : 'check');
+    }
+    expect(t.snapshotFor(a).players.find((p) => p.id === b).holeCards).toHaveLength(2);
+  });
+
+  it('never shows a folded hand', () => {
+    const t = headsUp();
+    t.startHand();
+    const folder = t.nextActorId();
+    const other = folder === 'A' ? 'B' : 'A';
+    t.applyAction(folder, 'fold');
+    expect(t.snapshotFor(other).players.find((p) => p.id === folder).holeCards).toBeNull();
+  });
+
+  it('skips players who are sitting out', () => {
+    const t = new GameTable({ smallBlind: 10, bigBlind: 20 });
+    ['A', 'B', 'C'].forEach((id, seat) => t.addPlayer({ id, seat }));
+    t.setSittingOut('C', true);
+    t.startHand();
+    expect(t.playerById('C').status).toBe('seated');
+    expect(t.playerById('C').holeCards).toBeNull();
+  });
+
+  it('reports main and side pots', () => {
+    const t = new GameTable({ smallBlind: 10, bigBlind: 20 });
+    ['A', 'B', 'C'].forEach((id, seat) => t.addPlayer({ id, seat }));
+    t.playerById('A').chips = 100;
+    t.startHand();
+    // Everyone puts in 100 preflop; A is all-in for exactly that.
+    while (t.street === 'preflop') {
+      const id = t.nextActorId();
+      const p = t.playerById(id);
+      if (id === 'A') t.applyAction(id, 'allin');
+      else if (p.contributions.preflop < 100) t.applyAction(id, t.currentBet >= 100 ? 'call' : 'raise', 100);
+      else t.applyAction(id, 'check');
+    }
+    expect(t.snapshot().pots).toEqual([{ amount: 300, contenders: 3 }]);
+    // B and C keep betting on the flop: that money is a side pot A cannot win.
+    t.applyAction(t.nextActorId(), 'bet', 200);
+    t.applyAction(t.nextActorId(), 'call');
+    expect(t.snapshot().pots).toEqual([
+      { amount: 300, contenders: 3 },
+      { amount: 400, contenders: 2 }
+    ]);
+  });
+
+  it('changes blinds only between hands', () => {
+    const t = headsUp();
+    t.setBlinds(25, 50);
+    expect(t.bigBlind).toBe(50);
+    t.startHand();
+    expect(() => t.setBlinds(50, 100)).toThrow(/between hands/);
+  });
+});
+
+describe('pot display', () => {
+  it('shows one pot while nobody is all in, however uneven the bets', () => {
+    const t = new GameTable({ smallBlind: 10, bigBlind: 20 });
+    ['A', 'B', 'C', 'D'].forEach((id, seat) => t.addPlayer({ id, seat }));
+    t.startHand();
+    t.applyAction(t.nextActorId(), 'raise', 60);
+    expect(t.snapshot().pots).toEqual([{ amount: 90, contenders: 4 }]);
+  });
+
+  it('always adds up to the whole pot', () => {
+    const rng = new Rng('pot-display');
+    for (let i = 0; i < 200; i += 1) {
+      const t = new GameTable({ smallBlind: 10, bigBlind: 20, tutorialSeed: `pd-${i}` });
+      ['A', 'B', 'C', 'D'].forEach((id, seat) => {
+        t.addPlayer({ id, seat });
+        t.playerById(id).chips = 30 + rng.nextInt(600);
+      });
+      t.startHand();
+      while (t.inHand) {
+        const pots = t.snapshot().pots;
+        expect(pots.reduce((sum, p) => sum + p.amount, 0)).toBe(t.pot);
+        const id = t.nextActorId();
+        const [action, amount] = randomAction(t, id, rng);
+        t.applyAction(id, action, amount);
+      }
+    }
+  });
+});

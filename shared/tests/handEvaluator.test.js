@@ -150,3 +150,20 @@ describe('categoryName', () => {
     expect(categoryName(CATEGORIES.FULL_HOUSE, 'es')).toBe('Full house');
   });
 });
+
+describe('fast evaluator matches the reference evaluator', () => {
+  it('agrees on category and tiebreakers for thousands of random hands', async () => {
+    const { rankCards } = await import('../src/fastEval.js');
+    const { evaluateBest } = await import('../src/handEvaluator.js');
+    const { createShuffledDeck } = await import('../src/rng.js');
+    for (let i = 0; i < 4000; i += 1) {
+      const deck = createShuffledDeck(`fast-${i}`);
+      const n = 5 + (i % 3);
+      const cards = deck.slice(0, n);
+      const ref = evaluateBest(cards);
+      const fast = rankCards(cards);
+      expect(fast.category, cards.join(' ')).toBe(ref.category);
+      expect(fast.tiebreakers, cards.join(' ')).toEqual(ref.tiebreakers);
+    }
+  });
+});

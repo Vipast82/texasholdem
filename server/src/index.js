@@ -6,32 +6,36 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GameStateStore } from './gameStateStore.js';
 import { decideAction } from '@saloon/shared/ai';
-import { getProfile, pickBotName, Rng, buildHandRecord, serializeHandRecord } from '@saloon/shared';
+import {
+  getProfile,
+  personaFor,
+  styleLabel,
+  pickBotName,
+  Rng,
+  buildHandRecord,
+  serializeHandRecord,
+  recordOpponentHand
+} from '@saloon/shared';
+import {
+  DEFAULT_SETTINGS,
+  sanitizeSettings,
+  publicSettings,
+  blindsForLevel,
+  thinkingTimeMs,
+  dealDelayMs,
+  botLine,
+  IS_TEST
+} from './tableRules.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 
-// Bot "thinking" delay (ms). In tests this is tiny so the whole hand resolves
-// quickly; in production it gives the table a human-feel cadence.
-const BOT_DELAY_MS =
-  process.env.VITEST || process.env.VITEST_WORKER_ID || process.env.NODE_ENV === 'test'
-    ? 15
-    : 450;
-
 /** Hard cap on consecutive bot moves before we assume something is stuck. */
 const BOT_LOOP_GUARD = 150;
 
-/**
- * Delay before an all-bot (or bot-dealer) table auto-starts the NEXT hand.
- * In production this is a human-readable pause (≥3 s) so the result of the
- * finished hand is actually visible before the deck reshuffles. In tests it is
- * tiny so AI-only hands resolve quickly.
- */
-const HAND_RESTART_DELAY_MS =
-  process.env.VITEST || process.env.VITEST_WORKER_ID || process.env.NODE_ENV === 'test'
-    ? 15
-    : 3000;
+/** Missed turns in a row before a player is sat out automatically. */
+const TIMEOUTS_BEFORE_SIT_OUT = 2;
 
 const app = express();
 app.use(cors());
@@ -43,13 +47,9 @@ app.use(express.static(distDir));
 app.get('/health', (req, res) => res.json({ ok: true, name: 'saloon-server' }));
 
 // ----------------------------------------------------------------- avatars
-// Sprint 7: avatar SHARING. The avatar binary still never lives in IndexedDB
-// on the wire for OTHER players — each client keeps its own in IndexedDB. To
-// let the other seats actually SEE your avatar (the Sprint 7 requirement), the
-// server holds an in-memory blob store keyed by avatarId. On upload the client
-// POSTs the raw bytes here; other clients then fetch the same bytes from
-// GET /avatars/:id. This is per-process (resets on restart) and best-effort:
-// a missing blob just falls back to the neutral default seat avatar.
+// Uploaded pictures are shared through a small in-memory store keyed by
+// avatarId: the uploader POSTs the bytes, other seats GET them. Per-process
+// and best-effort; a missing picture falls back to the generated character.
 const avatarBlobs = new Map(); // avatarId -> { blob, mime }
 const MAX_AVATAR_UPLOAD = 20 * 1024 * 1024; // 20 MB, matches the client cap
 const MAX_AVATARS = 64; // oldest uploads are evicted past this
@@ -69,7 +69,10 @@ app.post('/avatars/:id', express.raw({ type: () => true, limit: MAX_AVATAR_UPLOA
     res.status(413).json({ ok: false, error: 'too large' });
     return;
   }
-  const mime = String(req.get('content-type') || '').split(';')[0].trim() || 'application/octet-stream';
+  const mime =
+    String(req.get('content-type') || '')
+      .split(';')[0]
+      .trim() || 'application/octet-stream';
   if (!mime.startsWith('image/')) {
     res.status(415).json({ ok: false, error: 'avatars must be images' });
     return;
@@ -97,28 +100,12 @@ app.get('/avatars/:id', (req, res) => {
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*', methods: ['GET', 'POST'] } });
 
-const store = new GameStateStore();
+const store = new GameStateStore(DEFAULT_SETTINGS);
 
 // ----------------------------------------------------------------- helpers
 
 function tableRoom(tableId) {
   return `table:${tableId}`;
-}
-
-/**
- * Push a fresh, per-viewer snapshot to every seated player in a table.
- * Each player only ever sees their own hole cards (server authority).
- */
-function broadcast(tableId) {
-  const entry = store.get(tableId);
-  if (!entry) return;
-  for (const playerId of entry.players.keys()) {
-    const sid = entry.players.get(playerId).socketId;
-    const socket = io.sockets.sockets.get(sid);
-    if (socket) socket.emit('state', entry.table.snapshotFor(playerId));
-  }
-  // Spectators (if any) get their own, server-authorized snapshot too.
-  notifySpectators(tableId);
 }
 
 function assignSeat(table) {
@@ -129,30 +116,102 @@ function assignSeat(table) {
   return -1;
 }
 
+/** Tell everyone at a table about something (shown as a toast). */
+function notice(tableId, key, vars = {}) {
+  io.to(tableRoom(tableId)).emit('notice', { key, vars, ts: Date.now() });
+}
+
+/** CPU table talk, sent like any chat message. */
+function botSay(tableId, name, kind) {
+  const text = botLine(kind);
+  if (text) io.to(tableRoom(tableId)).emit('chatMessage', { from: name, text, ts: Date.now(), bot: true });
+}
+
+/**
+ * The view one player (or spectator) gets: the engine snapshot plus the
+ * server's table state — settings, shot clock, next-deal countdown,
+ * tournament status and session results.
+ */
+function viewFor(entry, viewerId, options = {}) {
+  const now = Date.now();
+  const table = entry.table;
+  const snap = table.snapshotFor(viewerId, options);
+  // "Away" (tournament sit-out) shows the same as sitting out.
+  snap.players = snap.players.map((p) => {
+    const meta = entry.players.get(p.id);
+    return meta && meta.away ? { ...p, sittingOut: true } : p;
+  });
+  const session = {};
+  for (const p of table.players) {
+    const meta = entry.players.get(p.id) || {};
+    const s = entry.session[p.id] || { handsWon: 0, biggestPot: 0 };
+    session[p.id] = {
+      handsWon: s.handsWon,
+      biggestPot: s.biggestPot,
+      net: p.chips - (meta.buyIns || 1) * table.startingStack
+    };
+  }
+  const tour = entry.tour;
+  return {
+    ...snap,
+    settings: publicSettings(entry.settings),
+    turn: entry.turn
+      ? {
+          playerId: entry.turn.playerId,
+          remainingMs: Math.max(0, entry.turn.deadline - now),
+          totalMs: entry.turn.totalMs
+        }
+      : null,
+    nextHandIn: entry.nextHandAt ? Math.max(0, entry.nextHandAt - now) : null,
+    tournament: tour
+      ? {
+          level: tour.level,
+          handsLeftInLevel: Math.max(0, entry.settings.levelHands - tour.handsAtLevel),
+          nextBlinds: blindsForLevel(tour.level + 1, entry.settings.smallBlind, entry.settings.bigBlind),
+          finished: tour.finished,
+          standings: tour.standings
+        }
+      : null,
+    session
+  };
+}
+
+/** Push a fresh, per-viewer view to every seated player (own hole cards only). */
+function broadcast(tableId) {
+  const entry = store.get(tableId);
+  if (!entry) return;
+  for (const [playerId, meta] of entry.players.entries()) {
+    const socket = meta.socketId && io.sockets.sockets.get(meta.socketId);
+    if (socket) socket.emit('state', viewFor(entry, playerId));
+  }
+  notifySpectators(tableId);
+}
+
+/**
+ * Everything that has to happen after the table changes, in order: arm the
+ * shot clock, schedule the next deal, push the new state, let CPUs act.
+ */
+function sync(tableId) {
+  armTurnTimer(tableId);
+  scheduleNextHand(tableId);
+  broadcast(tableId);
+  driveBots(tableId);
+}
+
 // ----------------------------------------------------------------- spectators
 
-/**
- * Spectator capability (Sprint 4): per-table, per-socket.
- * Keyed by socket id (one socket = one client). Each spectator gets a
- * personal view flag: whether they requested "show all hole cards".
- */
-const spectators = new Map(); // tableId -> Map<socketId, { showAllCards: boolean }>
+/** tableId -> Map<socketId, { showAllCards }> */
+const spectators = new Map();
 
 /**
- * Auto-advance (bot turns + auto-start) is paused while ANY spectator is
- * watching. This is what makes step-through usable: the table freezes at the
- * current point and advances only when a spectator explicitly steps.
+ * Auto-advance (CPU turns, shot clock, auto-deal) is paused while anyone is
+ * spectating, so the step-through control can move the hand one action at a time.
  */
 function autoAdvancePaused(tableId) {
   const set = spectators.get(tableId);
   return !!(set && set.size > 0);
 }
 
-/**
- * Push each spectator a FRESH snapshot of their table. `revealAllHoles` is
- * authorized here, server-side, from the spectator's personal flag — the only
- * code path that ever sets it. Live players are NOT touched by this function.
- */
 function broadcastSpectators(tableId) {
   const set = spectators.get(tableId);
   if (!set || set.size === 0) return;
@@ -160,42 +219,49 @@ function broadcastSpectators(tableId) {
   if (!entry) return;
   for (const [socketId] of set.entries()) {
     const socket = io.sockets.sockets.get(socketId);
-    if (!socket) continue;
-    socket.emit('state', spectatorSnapshot(entry, socketId));
+    if (socket) socket.emit('state', spectatorSnapshot(entry, socketId));
   }
 }
 
-/** Re-broadcast to every spectator after any table mutation. */
 function notifySpectators(tableId) {
   if (autoAdvancePaused(tableId)) broadcastSpectators(tableId);
 }
 
-/** Build a server-authorized spectator snapshot (reveal-all holes) for one socket. */
+/** Spectator view; revealing every hole card is authorised here, server-side. */
 function spectatorSnapshot(entry, socketId) {
-  const tableId = entry.table.tableId;
-  const map = spectators.get(tableId) || new Map();
+  const map = spectators.get(entry.table.tableId) || new Map();
   const meta = map.get(socketId) || { showAllCards: true };
   return {
-    ...entry.table.snapshotFor(null, { revealAllHoles: !!meta.showAllCards }),
+    ...viewFor(entry, null, { revealAllHoles: !!meta.showAllCards }),
     playerId: null,
     spectator: true
   };
 }
 
-// ----------------------------------------------------------------- bots
+// ----------------------------------------------------------------- avatars meta
+
+const LOOK_KEYS = [
+  'backdrop',
+  'skin',
+  'hat',
+  'hatColor',
+  'hair',
+  'hairColor',
+  'facial',
+  'shirt',
+  'bandana',
+  'eyes'
+];
 
 /**
- * Sprint 5 avatar privacy: only a small, whitelisted metadata object may be
- * stored on a player and broadcast in the snapshot. We explicitly copy only the
- * allowed keys (all small, JSON-safe scalars) so a client can never smuggle a
- * Blob/base64 blob or nested object over the wire. `crop` is a plain rect the
- * server does not interpret — it only describes how the CLIENT should display
- * its own avatar.
+ * Only small, whitelisted avatar metadata may ride along with a player: an
+ * uploaded picture's id + crop, or a character-creator look (small integers).
+ * No binary data ever goes over the socket.
  */
 function sanitizeAvatarMeta(meta) {
   if (!meta || typeof meta !== 'object') return null;
   const out = {};
-  const pickStr = (v) => (typeof v === 'string' ? v : null);
+  const pickStr = (v) => (typeof v === 'string' ? v.slice(0, 80) : null);
   const pickNum = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
   const id = pickStr(meta.avatarId);
   const kind = pickStr(meta.kind);
@@ -205,174 +271,295 @@ function sanitizeAvatarMeta(meta) {
   if (typeof meta.crop === 'object' && meta.crop != null) {
     const c = meta.crop;
     const crop = {};
-    if (pickNum(c.x) != null) crop.x = c.x;
-    if (pickNum(c.y) != null) crop.y = c.y;
-    if (pickNum(c.size) != null) crop.size = c.size;
-    if (pickNum(c.w) != null) crop.w = c.w;
-    if (pickNum(c.h) != null) crop.h = c.h;
+    for (const k of ['x', 'y', 'size', 'w', 'h']) if (pickNum(c[k]) != null) crop[k] = c[k];
     if (Object.keys(crop).length > 0) out.crop = crop;
+  }
+  if (typeof meta.look === 'object' && meta.look != null) {
+    const look = {};
+    for (const k of LOOK_KEYS) {
+      const v = meta.look[k];
+      if (Number.isInteger(v) && v >= 0 && v < 32) look[k] = v;
+    }
+    if (Object.keys(look).length > 0) out.look = look;
   }
   return Object.keys(out).length > 0 ? out : null;
 }
 
-/** Normalize the bot's stored metadata to a difficulty string. */
 function normalizeDifficulty(bot) {
   if (!bot) return 'normal';
-  if (typeof bot === 'string') return bot;
-  return bot.difficulty || bot.level || 'normal';
+  if (typeof bot === 'string') return ['easy', 'normal', 'hard'].includes(bot) ? bot : 'normal';
+  return normalizeDifficulty(bot.difficulty || bot.level || 'normal');
+}
+
+// ----------------------------------------------------------------- shot clock
+
+function clearTurn(entry) {
+  if (entry.turn && entry.turn.timer) clearTimeout(entry.turn.timer);
+  entry.turn = null;
 }
 
 /**
- * If the table should auto-deal the next hand (AI-only table, or the dealer
- * button is a bot), start it after a human-readable pause so the result of the
- * finished hand is visible before reshuffle. A human dealer always has to click
- * "Start Hand" themselves (the requirement: human dealer controls the deal).
+ * Start the shot clock for the human whose turn it is (if the table uses one).
+ * A player who is sitting out gets acted for almost at once.
  */
-function autoStartIfAllBots(tableId) {
+function armTurnTimer(tableId) {
   const entry = store.get(tableId);
   if (!entry) return;
-  const table = entry.table;
-  if (table.inHand) return;
-  const seated = table.players.filter((p) => p.status === 'seated' && p.chips > 0);
-  if (seated.length < 2) return;
-  const allBots = table.players.every((p) => p.isBot);
-  const dealerIsBot =
-    !allBots && table.players.some((p) => p.seat === table.dealerSeat && p.isBot);
-  if (!allBots && !dealerIsBot) return;
-  setTimeout(() => {
-    const t = store.get(tableId)?.table;
-    if (!t || t.inHand) return;
-    if (t.players.filter((p) => p.status === 'seated' && p.chips > 0).length < 2) return;
-    try {
-      t.startHand();
-      broadcast(tableId);
-      driveBots(tableId);
-    } catch (err) {
-      // Hand could not start (chips, etc.) — ignore for this round.
+  const t = entry.table;
+  const nextId = t.inHand ? t.nextActorId() : null;
+  const actor = nextId && t.playerById(nextId);
+  const key = nextId ? `${t.handNumber}:${t.actionLog.length}:${nextId}` : null;
+  if (entry.turn && entry.turn.key === key) return; // already running for this decision
+  clearTurn(entry);
+  if (!actor || actor.isBot || autoAdvancePaused(tableId)) return;
+  const meta = entry.players.get(nextId) || {};
+  // Away players are acted for at once; tests run the clock 100x faster.
+  const totalMs = actor.sittingOut || meta.away ? 700 : entry.settings.turnSeconds * (IS_TEST ? 10 : 1000);
+  if (!totalMs) return;
+  entry.turn = {
+    key,
+    playerId: nextId,
+    deadline: Date.now() + totalMs,
+    totalMs,
+    timer: setTimeout(() => onTurnTimeout(tableId, key), totalMs)
+  };
+}
+
+/** Time ran out: check if possible, otherwise fold. Repeat offenders sit out. */
+function onTurnTimeout(tableId, key) {
+  const entry = store.get(tableId);
+  if (!entry || !entry.turn || entry.turn.key !== key) return;
+  const id = entry.turn.playerId;
+  entry.turn = null;
+  const t = entry.table;
+  if (!t.inHand || t.nextActorId() !== id) return;
+  const p = t.playerById(id);
+  const owes = t.currentBet > p.contributions[t.street];
+  t.applyAction(id, owes ? 'fold' : 'check');
+  const meta = entry.players.get(id);
+  if (meta && !p.sittingOut && !meta.away) {
+    meta.timeouts = (meta.timeouts || 0) + 1;
+    if (meta.timeouts >= TIMEOUTS_BEFORE_SIT_OUT) {
+      setAway(entry, id, true);
+      notice(tableId, 'notice.satOut', { name: p.name });
     }
-  }, HAND_RESTART_DELAY_MS);
+  }
+  sync(tableId);
 }
 
 /**
- * Per-table pump state. `timer` is the pending bot step (null when idle),
- * `moveCount` caps consecutive bot moves within a hand so a buggy decision
- * can never loop forever; `handNum` detects hand transitions.
+ * Sit a player out (or back in). In a cash game they are simply not dealt in;
+ * in a tournament they stay dealt in and fold automatically, as in a real one.
  */
-const pumps = new Map(); // tableId -> { timer, moveCount, handNum }
+function setAway(entry, id, away) {
+  const meta = entry.players.get(id);
+  if (meta) {
+    meta.away = !!away;
+    meta.timeouts = 0;
+  }
+  if (!entry.tour) entry.table.setSittingOut(id, !!away);
+  return !!away;
+}
+
+// ----------------------------------------------------------------- dealing
+
+function eligibleCount(entry) {
+  const rebuys = entry.settings.cpuRebuy && entry.settings.mode === 'cash';
+  return entry.table.players.filter((p) => !p.sittingOut && (p.chips > 0 || (rebuys && p.isBot))).length;
+}
 
 /**
- * Fire one bot move (after BOT_DELAY_MS) if it is a bot's turn, then
- * re-schedule itself. Non-blocking: repeated pumpTable() calls on the same
- * table coalesce into one pending timer, so a human action arriving while a
- * bot is "thinking" never starves the bot's turn.
- *
- * Every bot decision is deterministic: the seed is derived from the current
- * game state plus the move counter, so the same hand always replays the same.
+ * Deal the next hand after a pause when the table runs itself: auto-deal is
+ * on, every seat is a CPU, or a CPU has the button.
+ */
+function scheduleNextHand(tableId) {
+  const entry = store.get(tableId);
+  if (!entry) return;
+  const t = entry.table;
+  if (t.inHand || entry.dealTimer || autoAdvancePaused(tableId)) return;
+  if (entry.tour && entry.tour.finished) return;
+  if (eligibleCount(entry) < 2) return;
+  const allBots = t.players.length > 0 && t.players.every((p) => p.isBot);
+  const dealerIsBot = t.handNumber > 0 && t.players.some((p) => p.seat === t.dealerSeat && p.isBot);
+  if (!entry.settings.autoDeal && !allBots && !dealerIsBot) return;
+  const delay = dealDelayMs({
+    speed: entry.settings.speed,
+    showdown: !!t.lastShowdown,
+    first: t.handNumber === 0
+  });
+  entry.nextHandAt = Date.now() + delay;
+  entry.dealTimer = setTimeout(() => {
+    entry.dealTimer = null;
+    entry.nextHandAt = null;
+    if (store.get(tableId) !== entry || entry.table.inHand) return;
+    dealHand(tableId);
+  }, delay);
+}
+
+function cancelScheduledDeal(entry) {
+  if (entry.dealTimer) clearTimeout(entry.dealTimer);
+  entry.dealTimer = null;
+  entry.nextHandAt = null;
+}
+
+/** Start a hand now: CPU rebuys, tournament blind levels, then deal. */
+function dealHand(tableId, seed = null) {
+  const entry = store.get(tableId);
+  if (!entry) return false;
+  cancelScheduledDeal(entry);
+  const t = entry.table;
+  if (entry.settings.cpuRebuy && entry.settings.mode === 'cash') {
+    for (const p of t.players) {
+      if (p.isBot && p.chips === 0) {
+        t.rebuy(p.id);
+        const meta = entry.players.get(p.id);
+        if (meta) meta.buyIns = (meta.buyIns || 1) + 1;
+      }
+    }
+  }
+  if (entry.tour) {
+    const tour = entry.tour;
+    if (tour.handsAtLevel >= entry.settings.levelHands) {
+      tour.level += 1;
+      tour.handsAtLevel = 0;
+      const [sb, bb] = blindsForLevel(tour.level, entry.settings.smallBlind, entry.settings.bigBlind);
+      t.setBlinds(sb, bb);
+      notice(tableId, 'notice.blindsUp', { sb, bb, level: tour.level });
+    }
+  }
+  if (seed != null) t._handSeed = seed;
+  t.startHand();
+  if (entry.tour) entry.tour.handsAtLevel += 1;
+  sync(tableId);
+  return true;
+}
+
+/** Bookkeeping when a hand ends: CPU memory, session results, tournament places, table talk. */
+function onHandEnded(tableId) {
+  const entry = store.get(tableId);
+  if (!entry) return;
+  const t = entry.table;
+  recordOpponentHand(entry.reads, t);
+  const payouts = t.payouts || {};
+  for (const [id, amount] of Object.entries(payouts)) {
+    if (!(amount > 0)) continue;
+    const s = entry.session[id] || (entry.session[id] = { handsWon: 0, biggestPot: 0 });
+    s.handsWon += 1;
+    s.biggestPot = Math.max(s.biggestPot, t.lastPot || amount);
+  }
+
+  // Table talk: a CPU that just won a decent pot (or lost its stack) may speak up.
+  const potBB = (t.lastPot || 0) / t.bigBlind;
+  const talkative = t.handNumber - (entry.lastBotTalk || -10) >= 3;
+  if (talkative && Math.random() < 0.35) {
+    const winnerBot = t.players.find((p) => p.isBot && payouts[p.id] > 0);
+    if (winnerBot && potBB >= 15) {
+      botSay(tableId, winnerBot.name, 'win');
+      entry.lastBotTalk = t.handNumber;
+    }
+  }
+
+  // Tournament: anyone who just ran out of chips is out; last one standing wins.
+  if (entry.tour && !entry.tour.finished) {
+    const tour = entry.tour;
+    const busted = t.players.filter((p) => p.chips === 0 && !tour.out.includes(p.id));
+    const aliveBefore = t.players.length - tour.out.length;
+    busted.forEach((p, i) => {
+      tour.out.push(p.id);
+      const place = aliveBefore - (busted.length - 1 - i);
+      notice(tableId, 'notice.eliminated', { name: p.name, place });
+      if (p.isBot) botSay(tableId, p.name, 'busted');
+    });
+    const alive = t.players.filter((p) => p.chips > 0);
+    if (alive.length <= 1) {
+      tour.finished = true;
+      const order = [...alive.map((p) => p.id), ...[...tour.out].reverse()];
+      tour.standings = order.map((id, i) => {
+        const p = t.playerById(id);
+        return { id, name: p ? p.name : '?', place: i + 1 };
+      });
+      if (alive[0]) notice(tableId, 'notice.tournamentWon', { name: alive[0].name });
+    }
+  }
+}
+
+// ----------------------------------------------------------------- bots
+
+/** tableId -> { timer, moveCount, handNum } */
+const pumps = new Map();
+
+/**
+ * If a CPU is to act, let it think for a human-like moment, decide, act, and
+ * repeat while CPUs keep having the turn. Repeated calls coalesce into one
+ * pending step per table.
  */
 function driveBots(tableId) {
+  const entry = store.get(tableId);
+  if (!entry || autoAdvancePaused(tableId)) return;
+  const t = entry.table;
+  if (!t.inHand) return;
+  const nextId = t.nextActorId();
+  const actor = nextId && t.playerById(nextId);
+  if (!actor || !actor.isBot) return;
+
   let pump = pumps.get(tableId);
   if (!pump) {
     pump = { timer: null, moveCount: 0, handNum: -1 };
     pumps.set(tableId, pump);
   }
-  if (pump.timer) return; // a pending step already covers this table
+  if (pump.timer) return;
+  const owes = Math.max(0, t.currentBet - actor.contributions[t.street]);
+  const delay = thinkingTimeMs({ speed: entry.settings.speed, toCall: owes, pot: t.pot, chips: actor.chips });
+
   pump.timer = setTimeout(() => {
     pump.timer = null;
-    const entry = store.get(tableId);
-    const table = entry && entry.table;
-    if (!table) {
+    const live = store.get(tableId);
+    if (!live || live !== entry) {
       pumps.delete(tableId);
       return;
     }
-    // New hand started: reset the move budget.
+    const table = entry.table;
     if (table.handNumber !== pump.handNum) {
       pump.handNum = table.handNumber;
       pump.moveCount = 0;
     }
-    if (table.inHand) {
-      const nextId = table.nextActorId();
-      const actor = nextId && table.playerById(nextId);
-      if (
-        actor &&
-        actor.isBot &&
-        !actor.hasFolded &&
-        actor.chips > 0 &&
-        pump.moveCount < BOT_LOOP_GUARD
-      ) {
-        pump.moveCount += 1;
-        const difficulty = normalizeDifficulty(actor.bot);
-        const seed = [
-          tableId,
-          table.handNumber,
-          table.street,
-          nextId,
-          table.raiseCount,
-          table.currentBet,
-          table.pot,
-          pump.moveCount // unique per pump-table loop iteration
-        ].join(':');
-        let decision;
-        try {
-          decision = decideAction(table, nextId, { difficulty, seed });
-        } catch (err) {
-          // Surface AI errors so a stuck bot never silently freezes the table.
-          if (typeof console !== 'undefined' && console.error) {
-            console.error(`[bot ${actor.name}@${tableId}] decideAction failed:`, err && err.message);
-          }
-          return;
-        }
-        try {
-          table.applyAction(nextId, decision.action, decision.amount || 0);
-        } catch (err) {
-          if (typeof console !== 'undefined' && console.error) {
-            console.error(`[bot ${actor.name}@${tableId}] applyAction failed (${decision.action}/${decision.amount}):`, err && err.message);
-          }
-          return;
-        }
-        broadcast(tableId);
-        // Let the UI show the bot's "thinking" / reason line.
-        io.to(tableRoom(tableId)).emit('botAction', {
-          playerId: nextId,
-          action: decision.action,
-          reason: decision.reason,
-          confidence: decision.confidence
-        });
-      }
+    const id = table.inHand ? table.nextActorId() : null;
+    const bot = id && table.playerById(id);
+    if (!bot || !bot.isBot || autoAdvancePaused(tableId) || pump.moveCount >= BOT_LOOP_GUARD) return;
+    pump.moveCount += 1;
+    const seed = [tableId, table.handNumber, table.street, id, table.actionLog.length, pump.moveCount].join(
+      ':'
+    );
+    let decision;
+    try {
+      decision = decideAction(table, id, {
+        difficulty: normalizeDifficulty(bot.bot),
+        persona: bot.name,
+        reads: entry.reads,
+        seed
+      });
+      table.applyAction(id, decision.action, decision.amount || 0);
+    } catch (err) {
+      // Never let a CPU stall the table: fall back to the safest legal move.
+      console.error(`[bot ${bot.name}@${tableId}] ${err && err.message}`);
+      const fallback = table.currentBet > bot.contributions[table.street] ? 'fold' : 'check';
+      table.applyAction(id, fallback);
+      decision = { action: fallback, reason: 'fallback', confidence: 0 };
     }
-    // Only re-schedule if we actually moved a bot, or a bot is still to act.
-    // If a human is next (or the hand ended), stop and wait for input.
-    // Spectators pause auto-advance, so no auto re-schedule in that case.
-    if (table.inHand && !autoAdvancePaused(tableId)) {
-      const next = table.nextActorId();
-      const na = next && table.playerById(next);
-      if (na && na.isBot && !na.hasFolded && na.chips > 0) {
-        driveBots(tableId);
-      } else {
-        pumps.delete(tableId);
-      }
-    } else {
-      pumps.delete(tableId);
-      if (!autoAdvancePaused(tableId)) autoStartIfAllBots(tableId);
-      // Spectators see the frozen state; they drive the hand via `step`.
-    }
-    notifySpectators(tableId);
-  }, BOT_DELAY_MS);
+    io.to(tableRoom(tableId)).emit('botAction', {
+      playerId: id,
+      action: decision.action,
+      reason: decision.reason,
+      confidence: decision.confidence
+    });
+    sync(tableId);
+  }, delay);
 }
 
-/** Fire-and-forget: auto-start (if all bots) and then drive any bot turns. */
-function pumpTable(tableId) {
-  autoStartIfAllBots(tableId);
-  driveBots(tableId);
-}
+// ----------------------------------------------------------------- events + history
 
-// ----------------------------------------------------------------- tutorial
-
-/**
- * The raw events a live GameTable can emit. The server mirrors each one to the
- * table room as `gameEvent { event, payload }` so the client tutorial engine can
- * subscribe to a single, stable channel instead of N individual sockets.
- */
-const TUTORIAL_EVENTS = [
+/** Raw GameTable events mirrored to the room as `gameEvent` (tutorial, sounds). */
+const TABLE_EVENTS = [
   'handStarted',
   'blindsPosted',
   'holeDealt',
@@ -385,17 +572,11 @@ const TUTORIAL_EVENTS = [
   'handEnded'
 ];
 
-/** Tables whose event stream has already been mirrored (avoid double-subscribe). */
-const mirrored = new Set();
+/** Tables whose events are already wired up. */
+const attached = new Set();
 
-// ----------------------------------------------------------------- hand history
-
-/**
- * Hand history (Sprint 4): an in-memory ring of finished hands, newest last.
- * Each record is built by the PURE `buildHandRecord` (shared) so the server and
- * any future importer share one definition. Capped to keep memory bounded.
- */
-const handHistory = []; // array of hand records
+/** In-memory ring of finished hands (newest last), shared by every table. */
+const handHistory = [];
 const HAND_HISTORY_CAP = 100;
 
 function recordHand(tableId, table) {
@@ -412,40 +593,27 @@ function recordHand(tableId, table) {
     if (!p.bestHand) p.holeCards = null;
   }
   handHistory.push(rec);
-  if (handHistory.length > HAND_HISTORY_CAP) {
-    handHistory.splice(0, handHistory.length - HAND_HISTORY_CAP);
-  }
-  // Broadcast the fresh record to everyone currently at the table.
+  if (handHistory.length > HAND_HISTORY_CAP) handHistory.splice(0, handHistory.length - HAND_HISTORY_CAP);
   io.to(tableRoom(tableId)).emit('handRecord', rec);
   return rec;
 }
 
-/**
- * Subscribe to a table's GameTable events (once) and re-broadcast each as
- * `gameEvent` to the whole room. Client-side (tutorial engine) only.
- */
-function mirrorTableEvents(tableId) {
-  if (mirrored.has(tableId)) return;
-  mirrored.add(tableId);
+/** Wire a table's events to the room, the history and the hand-end bookkeeping (once). */
+function attachTable(tableId) {
+  if (attached.has(tableId)) return;
   const entry = store.get(tableId);
   if (!entry) return;
+  attached.add(tableId);
   const table = entry.table;
-  for (const eventName of TUTORIAL_EVENTS) {
+  for (const eventName of TABLE_EVENTS) {
     table.on(eventName, (payload) => {
       io.to(tableRoom(tableId)).emit('gameEvent', { event: eventName, payload });
-      if (eventName === 'handEnded') recordHand(tableId, table);
+      if (eventName === 'handEnded') {
+        recordHand(tableId, table);
+        onHandEnded(tableId);
+      }
     });
   }
-}
-
-/**
- * Set the seeded walkthrough for the next hand. The GameTable reads `_handSeed`
- * when `startHand()` shuffles, so the same seed reproduces the same cards/deck
- * order (determinism requirement). Returns the seed actually stored.
- */
-function setHandSeed(table, seed) {
-  table._handSeed = seed;
-  return seed;
 }
 
 // ----------------------------------------------------------------- sockets
@@ -457,7 +625,9 @@ function teardownIfEmpty(tableId) {
   const pump = pumps.get(tableId);
   if (pump && pump.timer) clearTimeout(pump.timer);
   pumps.delete(tableId);
-  mirrored.delete(tableId);
+  clearTurn(entry);
+  cancelScheduledDeal(entry);
+  attached.delete(tableId);
   store.delete(tableId);
 }
 
@@ -466,9 +636,23 @@ function dropSpectator(socketId) {
   for (const [tableId, set] of [...spectators.entries()]) {
     if (!set.delete(socketId)) continue;
     if (set.size === 0) spectators.delete(tableId);
-    pumpTable(tableId); // the last watcher left — resume auto-advance
+    sync(tableId); // the last watcher left — resume auto-advance
     teardownIfEmpty(tableId);
   }
+}
+
+/** Seat a server-driven CPU player (no socket of its own). */
+function seatBot(entry, difficulty) {
+  const seat = assignSeat(entry.table);
+  if (seat < 0) throw new Error('table full');
+  const profile = getProfile(difficulty);
+  const botId = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const taken = entry.table.players.map((p) => p.name);
+  const botName = pickBotName(profile, new Rng(`name:${botId}`), taken);
+  const style = styleLabel(personaFor(profile, botName));
+  entry.table.addPlayer({ id: botId, name: botName, seat, isBot: true, bot: { difficulty, style } });
+  entry.players.set(botId, { name: botName, socketId: null, timeouts: 0, buyIns: 1 });
+  return botId;
 }
 
 io.on('connection', (socket) => {
@@ -510,10 +694,11 @@ io.on('connection', (socket) => {
       socket.leave(tableRoom(tableId));
       const entry = store.get(tableId);
       if (entry) {
+        const leaving = entry.table.playerById(playerId);
         entry.players.delete(playerId);
         entry.table.removePlayer(playerId);
-        // Remove any AI opponents (server-side bots with no socket) so we don't
-        // leave an orphaned bot at an otherwise empty table.
+        if (leaving) notice(tableId, 'notice.left', { name: leaving.name });
+        // CPUs do not stay at a table with no humans left.
         const humansLeft = [...entry.players.values()].some((p) => p.socketId !== null);
         if (!humansLeft) {
           for (const [pid, meta] of [...entry.players.entries()]) {
@@ -523,131 +708,146 @@ io.on('connection', (socket) => {
             }
           }
         }
-        broadcast(tableId);
-        // The leaver may have been holding up a bot's turn.
-        pumpTable(tableId);
+        sync(tableId);
         teardownIfEmpty(tableId);
       }
     }
-    // Drop any spectator session for this socket so auto-advance can resume.
     dropSpectator(socket.id);
   };
 
-  /** Seat a server-driven AI player (no socket of its own). */
-  const seatBot = (entry, difficulty) => {
-    const seat = assignSeat(entry.table);
-    if (seat < 0) throw new Error('table full');
-    const profile = getProfile(difficulty);
-    const botId = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const taken = entry.table.players.map((p) => p.name);
-    const botName = pickBotName(profile, new Rng(`name:${botId}`), taken);
-    entry.table.addPlayer({ id: botId, name: botName, seat, isBot: true, bot: { difficulty } });
-    entry.players.set(botId, { name: botName, socketId: null });
-    return botId;
-  };
-
   on('listTables', (_payload, reply) => {
-    reply(store.listTables());
+    reply(
+      store.listTables().map((tbl) => {
+        const entry = store.get(tbl.tableId);
+        return { ...tbl, mode: entry.settings.mode, startingStack: entry.settings.startingStack };
+      })
+    );
   });
 
-  on('joinTable', ({ tableId, name, isBot, bot, spawnBot, botDifficulty, avatarMeta }, reply) => {
+  on('joinTable', (payload, reply) => {
+    const { tableId, name, isBot, bot, spawnBot, botDifficulty, avatarMeta, options } = payload;
     if (typeof tableId !== 'string' || !tableId.trim()) throw new Error('table name required');
     if (binding) throw new Error('you already have a seat — leave first');
     const id = tableId.trim().slice(0, 64);
     const playerName = (typeof name === 'string' && name.trim().slice(0, 32)) || 'Player';
-    const entry = store.getOrCreate(id);
-    // One socket = one player (local game). Use the socket id as the player id
-    // so two browser tabs are two distinct players.
+    const isNew = !store.get(id);
+    const entry = store.getOrCreate(id, options ? sanitizeSettings(options) : DEFAULT_SETTINGS);
+    if (isNew && entry.settings.mode === 'tournament') {
+      entry.tour = { level: 1, handsAtLevel: 0, out: [], finished: false, standings: null };
+    }
+    if (entry.tour && entry.table.handNumber > 0 && !entry.tour.finished) {
+      throw new Error('this tournament has already started');
+    }
+    // One socket = one player: the socket id is the player id, so two browser
+    // tabs are two distinct players.
     const playerId = socket.id;
     if (entry.players.has(playerId)) throw new Error('you already have a seat at this table');
     const seat = assignSeat(entry.table);
     if (seat < 0) throw new Error('table full');
-    // avatarMeta is SMALL metadata only (avatarId + crop + kind); the binary
-    // never crosses the socket — see sanitizeAvatarMeta.
     entry.table.addPlayer({
       id: playerId,
       name: playerName,
       seat,
       isBot: !!isBot,
-      bot,
+      bot: isBot ? { difficulty: normalizeDifficulty(bot) } : null,
       avatarMeta: sanitizeAvatarMeta(avatarMeta)
     });
-    entry.players.set(playerId, { name: playerName, socketId: socket.id });
+    entry.players.set(playerId, { name: playerName, socketId: socket.id, timeouts: 0, buyIns: 1 });
     binding = { tableId: id, playerId };
     socket.join(tableRoom(id));
-    // Make sure this table's GameTable events are mirrored to the room so
-    // any connected tutorial engine can receive gameEvent broadcasts.
-    mirrorTableEvents(id);
+    attachTable(id);
+    if (!isNew) notice(id, 'notice.joined', { name: playerName });
 
-    // "Play vs AI": seat an AI opponent so the human has someone to play.
-    if (spawnBot && !isBot && assignSeat(entry.table) >= 0) {
-      seatBot(entry, normalizeDifficulty(botDifficulty));
+    // CPU opponents: the classic single "play vs AI" bot, or several from the
+    // table setup screen.
+    const cpuCount = Math.max(0, Math.min(9, Number(options && options.cpuCount) || 0));
+    const wanted = spawnBot && !isBot ? Math.max(1, cpuCount) : cpuCount;
+    const MIXED = ['easy', 'normal', 'hard'];
+    for (let i = 0; i < wanted && assignSeat(entry.table) >= 0; i += 1) {
+      // "mixed" seats a spread of easy, normal and hard CPUs.
+      const diff = botDifficulty === 'mixed' ? MIXED[i % MIXED.length] : normalizeDifficulty(botDifficulty);
+      const botId = seatBot(entry, diff);
+      if (i === 0 && Math.random() < 0.6) botSay(id, entry.table.playerById(botId).name, 'greet');
     }
 
     reply({ ok: true, playerId, tableId: id });
-    broadcast(id);
-    // An AI-only table should start playing on its own.
-    pumpTable(id);
+    sync(id);
   });
 
   on('startHand', (payload, reply) => {
     const entry = seatedEntry();
-    // Optional seeded walkthrough (tutorial): set the deck seed BEFORE the
-    // hand starts so the shuffle reproduces the same hand.
-    if (payload.seed != null) setHandSeed(entry.table, payload.seed);
-    mirrorTableEvents(binding.tableId);
-    entry.table.startHand();
-    reply({ ok: true, snapshot: entry.table.snapshotFor(binding.playerId) });
-    broadcast(binding.tableId);
-    // If the first actor to act is a bot (e.g. the dealer is a bot), play it now.
-    pumpTable(binding.tableId);
+    if (entry.tour && entry.tour.finished) throw new Error('the tournament is over — start a new one');
+    dealHand(binding.tableId, payload.seed != null ? payload.seed : null);
+    reply({ ok: true, snapshot: viewFor(entry, binding.playerId) });
   });
 
   on('playerAction', ({ action, amount }, reply) => {
     const entry = seatedEntry();
     entry.table.applyAction(binding.playerId, action, amount || 0);
-    reply({ ok: true, snapshot: entry.table.snapshotFor(binding.playerId) });
-    broadcast(binding.tableId);
-    // If a bot is now to act, let it play (and chain on subsequent bots).
-    pumpTable(binding.tableId);
+    const meta = entry.players.get(binding.playerId);
+    if (meta) meta.timeouts = 0;
+    clearTurn(entry);
+    reply({ ok: true, snapshot: viewFor(entry, binding.playerId) });
+    sync(binding.tableId);
+  });
+
+  on('sitOut', ({ out }, reply) => {
+    const entry = seatedEntry();
+    const sitting = setAway(entry, binding.playerId, !!out);
+    reply({ ok: true, sittingOut: sitting });
+    sync(binding.tableId);
   });
 
   on('rebuy', (_payload, reply) => {
     const entry = seatedEntry();
+    if (entry.tour) throw new Error('no rebuys in a tournament');
     const chips = entry.table.rebuy(binding.playerId);
+    const meta = entry.players.get(binding.playerId);
+    if (meta) meta.buyIns = (meta.buyIns || 1) + 1;
     reply({ ok: true, chips });
-    broadcast(binding.tableId);
-    pumpTable(binding.tableId);
+    sync(binding.tableId);
+  });
+
+  /** After a tournament ends, anyone at the table can start another. */
+  on('restartTournament', (_payload, reply) => {
+    const entry = seatedEntry();
+    if (!entry.tour || !entry.tour.finished) throw new Error('no finished tournament to restart');
+    const t = entry.table;
+    for (const p of t.players) {
+      p.chips = t.startingStack;
+      p.sittingOut = false;
+      const meta = entry.players.get(p.id);
+      if (meta) meta.away = false;
+    }
+    t.setBlinds(entry.settings.smallBlind, entry.settings.bigBlind);
+    entry.tour = { level: 1, handsAtLevel: 0, out: [], finished: false, standings: null };
+    entry.session = {};
+    reply({ ok: true });
+    notice(binding.tableId, 'notice.tournamentStart', {});
+    sync(binding.tableId);
   });
 
   on('chatMessage', ({ text }) => {
     const entry = seatedEntry();
-    const clean = String(text ?? '').trim().slice(0, 400);
+    const clean = String(text ?? '')
+      .trim()
+      .slice(0, 400);
     if (!clean) return;
     const name = (entry.players.get(binding.playerId) || {}).name || 'Player';
     io.to(tableRoom(binding.tableId)).emit('chatMessage', { from: name, text: clean, ts: Date.now() });
   });
 
-  /**
-   * Emote relay: the sender emits `emote { playerId, code }` and the server
-   * re-broadcasts it to the table room so every seat renders the bubble. The
-   * code is validated against the shared palette on the client.
-   */
+  /** Emote relay: re-broadcast `{ playerId, code }` to the whole table. */
   on('emote', ({ playerId, code }, reply) => {
     const entry = seatedEntry();
     const targetId = String(playerId || binding.playerId);
-    // Only allow emotes for a player actually seated at this table.
     if (!entry.table.players.some((p) => p.id === targetId)) throw new Error('unknown player');
     const safeCode = typeof code === 'string' ? code.slice(0, 32) : '';
     io.to(tableRoom(binding.tableId)).emit('emote', { playerId: targetId, code: safeCode, ts: Date.now() });
     reply({ ok: true, playerId: targetId, code: safeCode });
   });
 
-  /**
-   * Live avatar update: attach the caller's new (sanitized) avatarMeta to their
-   * seat and re-broadcast, so the other seats re-fetch the shared blob without
-   * a re-join. `avatarMeta: null` clears it.
-   */
+  /** Change your picture or character mid-session; `avatarMeta: null` clears it. */
   on('updateAvatar', ({ avatarMeta }, reply) => {
     const entry = seatedEntry();
     const me = entry.table.playerById(binding.playerId);
@@ -658,24 +858,24 @@ io.on('connection', (socket) => {
   });
 
   on('leaveTable', (_payload, reply) => {
-    // Covers both seated players and spectators (unbind drops both).
     unbind();
     reply({ ok: true });
   });
 
-  /** Add an AI opponent at-will. Usable by a seated player or a spectator. */
+  /** Add a CPU at any time (it is dealt in from the next hand). */
   on('addBot', ({ tableId, botDifficulty }, reply) => {
     if (!tableId) throw new Error('tableId required');
     const entry = store.get(tableId);
     if (!entry) throw new Error('table not found');
+    if (entry.tour && entry.table.handNumber > 0) throw new Error('the tournament has already started');
     const botId = seatBot(entry, normalizeDifficulty(botDifficulty));
-    mirrorTableEvents(tableId);
+    attachTable(tableId);
     reply({ ok: true, botId });
-    broadcast(tableId);
-    pumpTable(tableId);
+    notice(tableId, 'notice.joined', { name: entry.table.playerById(botId).name });
+    sync(tableId);
   });
 
-  /** Remove an AI player between hands (never a human seat). */
+  /** Remove a CPU between hands (never a human seat). */
   on('removeBot', ({ tableId, botId }, reply) => {
     if (!tableId) throw new Error('tableId required');
     const entry = store.get(tableId);
@@ -687,13 +887,10 @@ io.on('connection', (socket) => {
     entry.players.delete(botId);
     entry.table.removePlayer(botId);
     reply({ ok: true });
-    broadcast(tableId);
-    pumpTable(tableId);
+    sync(tableId);
   });
 
   // ------------------------------------------------------------- spectators
-  // A socket is either a live player (binding) or a spectator — never both.
-  // Spectators hold no seat and can see every hole card (server-authorized).
 
   on('enterSpectator', ({ tableId, showAllCards }, reply) => {
     if (!tableId) throw new Error('tableId required');
@@ -707,9 +904,11 @@ io.on('connection', (socket) => {
     }
     set.set(socket.id, { showAllCards: !!showAllCards });
     socket.join(tableRoom(tableId));
-    mirrorTableEvents(tableId);
+    attachTable(tableId);
+    // Spectating pauses the table: stop the clocks.
+    clearTurn(entry);
+    cancelScheduledDeal(entry);
     reply({ ok: true, snapshot: spectatorSnapshot(entry, socket.id) });
-    // Presence changes: broadcast the (possibly frozen) state to all watchers.
     notifySpectators(tableId);
   });
 
@@ -723,11 +922,7 @@ io.on('connection', (socket) => {
     notifySpectators(tableId);
   });
 
-  /**
-   * Advance the hand exactly one step (one legal actor move, or start the next
-   * hand). While a spectator is present auto-advance is paused, and `step` is
-   * the only way the table moves forward.
-   */
+  /** Advance the paused table exactly one action (or deal the next hand). */
   on('step', ({ tableId }, reply) => {
     if (!tableId) throw new Error('tableId required');
     const set = spectators.get(tableId);
@@ -740,21 +935,18 @@ io.on('connection', (socket) => {
     } else {
       const next = table.nextActorId();
       if (next) {
-        // `check` when nothing is owed; otherwise a deterministic, legal
-        // action from the (seeded) AI so step-through is always valid.
-        try {
-          table.applyAction(next, 'check', 0);
-        } catch (err) {
-          const d = decideAction(table, next, {
-            difficulty: 'easy',
-            seed: `${table.handNumber}-${table.street}-${table.actionLog.length}`
-          });
-          table.applyAction(next, d.action, d.amount || 0);
-        }
+        const actor = table.playerById(next);
+        const d = decideAction(table, next, {
+          difficulty: normalizeDifficulty(actor.bot || 'easy'),
+          persona: actor.name,
+          reads: entry.reads,
+          seed: `${table.handNumber}-${table.street}-${table.actionLog.length}`
+        });
+        table.applyAction(next, d.action, d.amount || 0);
       }
     }
     reply({ ok: true, snapshot: spectatorSnapshot(entry, socket.id) });
-    broadcast(tableId); // also pushes the fresh spectator state via notifySpectators
+    broadcast(tableId);
   });
 
   // ----------------------------------------------------------------- history
@@ -784,11 +976,7 @@ export function startServer(port = 0) {
   });
 }
 
-if (
-  process.env.NODE_ENV !== 'test' &&
-  !process.env.VITEST &&
-  !process.env.VITEST_WORKER_ID
-) {
+if (process.env.NODE_ENV !== 'test' && !process.env.VITEST && !process.env.VITEST_WORKER_ID) {
   server.listen(PORT, HOST, () => {
     console.log(`[saloon] server listening on http://${HOST}:${PORT}`);
   });

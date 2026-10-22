@@ -195,7 +195,10 @@ const SYNTH_PRESETS = {
   shuffle: { wave: 'square', from: 180, to: 120, dur: 0.2, amp: 0.35 },
   deal: { wave: 'triangle', from: 500, to: 240, dur: 0.1, amp: 0.45 },
   flip: { wave: 'triangle', from: 700, to: 300, dur: 0.12, amp: 0.45 },
-  chips: { wave: 'square', from: 880, to: 1320, dur: 0.28, amp: 0.6 }
+  chips: { wave: 'square', from: 880, to: 1320, dur: 0.28, amp: 0.6 },
+  // A soft two-note chime when the action reaches you, and the clock tick.
+  turn: { wave: 'sine', from: 660, to: 880, dur: 0.18, amp: 0.35 },
+  tick: { wave: 'sine', from: 1200, to: 1100, dur: 0.04, amp: 0.25 }
 };
 
 /**

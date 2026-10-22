@@ -21,8 +21,7 @@ const placeholders = (str) => {
   return out;
 };
 
-const sameSet = (a, b) =>
-  a.size === b.size && [...a].every((k) => b.has(k));
+const sameSet = (a, b) => a.size === b.size && [...a].every((k) => b.has(k));
 
 describe('i18n parity (en.json vs es.json)', () => {
   const enKeys = Object.keys(en);

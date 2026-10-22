@@ -78,7 +78,9 @@ describe('server AI bots end-to-end', () => {
 
     // Track the human's own broadcast view (Alice-seats-perspective).
     let last = null;
-    human.socket.on('state', (s) => { last = s; });
+    human.socket.on('state', (s) => {
+      last = s;
+    });
 
     // Start the hand as the human.
     const startRes = await new Promise((resolve) =>
@@ -126,11 +128,13 @@ describe('server AI bots end-to-end', () => {
     const total = last.players.reduce((sum, p) => sum + p.chips, 0) + last.pot;
     expect(total).toBe(last.startingStack * 2);
 
-    // Privacy: the human never sees the bot's hole cards.
+    // Privacy: the bot's cards are only shown if its hand reached showdown.
     const botInHumanView = last.players.find((p) => p.id === botId);
     expect(botInHumanView).toBeTruthy();
     expect(botInHumanView.isBot).toBe(true);
-    expect(botInHumanView.holeCards).toBeNull();
+    const shown = !!(last.lastShowdown && last.lastShowdown.all && last.lastShowdown.all[botId]);
+    if (shown) expect(botInHumanView.holeCards).toHaveLength(2);
+    else expect(botInHumanView.holeCards).toBeNull();
 
     human.socket.close();
     bot.socket.close();
@@ -141,7 +145,9 @@ describe('server AI bots end-to-end', () => {
     // Attach the state listener BEFORE joining so we catch the initial broadcast.
     const socket = Client(ioUrl, { transports: ['websocket'] });
     let last = null;
-    socket.on('state', (s) => { last = s; });
+    socket.on('state', (s) => {
+      last = s;
+    });
     const human = await new Promise((resolve, reject) => {
       socket.on('connect', () =>
         socket.emit('joinTable', { tableId, name: 'Human', spawnBot: true, botDifficulty: 'easy' }, (res) => {

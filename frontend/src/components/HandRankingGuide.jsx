@@ -2,17 +2,7 @@ import { t } from '../i18n.js';
 
 // Ranks in strict high-to-low order. `key` maps to the i18n keys
 // `hands.<key>` (name) and `hands.<key>.example`.
-const RANKS = [
-  'straight_flush',
-  'quads',
-  'full',
-  'flush',
-  'straight',
-  'trips',
-  'twopair',
-  'pair',
-  'high'
-];
+const RANKS = ['straight_flush', 'quads', 'full', 'flush', 'straight', 'trips', 'twopair', 'pair', 'high'];
 
 /**
  * A static, localized reference table of the nine five-card hand ranks,

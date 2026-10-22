@@ -97,21 +97,27 @@ describe('buildHandRecord schema', () => {
 
 describe('buildHandRecord determinism', () => {
   it('same seed + same actions => byte-identical record (ts fixed)', () => {
-    const a = buildHandRecord((() => {
-      const g = makeTable();
-      g._handSeed = 'determinism-seed';
-      g.startHand();
-      driveToFinish(g);
-      return g;
-    })(), { ts: 0 });
+    const a = buildHandRecord(
+      (() => {
+        const g = makeTable();
+        g._handSeed = 'determinism-seed';
+        g.startHand();
+        driveToFinish(g);
+        return g;
+      })(),
+      { ts: 0 }
+    );
 
-    const b = buildHandRecord((() => {
-      const g = makeTable();
-      g._handSeed = 'determinism-seed';
-      g.startHand();
-      driveToFinish(g);
-      return g;
-    })(), { ts: 0 });
+    const b = buildHandRecord(
+      (() => {
+        const g = makeTable();
+        g._handSeed = 'determinism-seed';
+        g.startHand();
+        driveToFinish(g);
+        return g;
+      })(),
+      { ts: 0 }
+    );
 
     expect(serializeHandRecord(a)).toBe(serializeHandRecord(b));
   });

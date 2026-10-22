@@ -47,6 +47,7 @@ function playAiOnlyHand(seed, difficulty = 'normal') {
 
   return {
     board: game.community.slice(),
+    holes: game.players.map((p) => (p.holeCards || []).join('')).join('|'),
     payouts: { ...game.payouts },
     actions,
     chipsAfter: Object.fromEntries(game.players.map((p) => [p.id, p.chips]))
@@ -71,10 +72,11 @@ describe('integration: AI-only full hand determinism', () => {
     expect(run.actions.length).toBeGreaterThan(0);
   });
 
-  it('different deck seeds produce different boards', () => {
+  it('different deck seeds deal different cards', () => {
+    // Compare the dealt hole cards: the hand may end before any board is dealt.
     const a = playAiOnlyHand('seed-one', 'normal');
     const b = playAiOnlyHand('seed-two', 'normal');
-    expect(a.board.join(',')).not.toBe(b.board.join(','));
+    expect(a.holes).not.toBe(b.holes);
   });
 });
 
@@ -129,7 +131,13 @@ describe('integration: hand-record round-trip stability', () => {
   }
 
   it('serialize -> parse -> serialize is byte-stable', () => {
-    const g = new GameTable({ tableId: 'rt', smallBlind: 10, bigBlind: 20, startingStack: 1000, tutorialSeed: 'rt-seed' });
+    const g = new GameTable({
+      tableId: 'rt',
+      smallBlind: 10,
+      bigBlind: 20,
+      startingStack: 1000,
+      tutorialSeed: 'rt-seed'
+    });
     g.addPlayer({ id: 'p1', name: 'Al', seat: 0 });
     g.addPlayer({ id: 'p2', name: 'Bo', seat: 1 });
     g.startHand();

@@ -42,6 +42,9 @@ npm run start          # serves frontend/dist + sockets on :3000
 
 # CI / automation (also run by GitHub Actions — see .github/workflows/)
 node scripts/ci-e2e-smoke.mjs   # boot prod server + HTTP/Socket.IO smoke (manual E2E)
+
+# CPU strength benchmark (6-handed, 2 CPUs per difficulty, bb/100 per difficulty)
+node scripts/ai-benchmark.mjs 12000
 ```
 
 ## Continuous Integration
@@ -59,62 +62,68 @@ node scripts/ci-e2e-smoke.mjs   # boot prod server + HTTP/Socket.IO smoke (manua
 
 ## Playing
 
-### Mixed human + AI table ("Play vs AI")
+Start the server (`npm run dev:server` + `npm run dev:client` in development, or
+`npm run build && npm run start`), open the page, pick a name and a character, and
+choose how to play:
 
-1. Start the server: `npm run dev:server` (or `npm run start` for prod).
-2. Open the UI (`http://localhost:5173` in dev, `http://localhost:3000` in prod).
-3. On the join screen:
-   - enter a **Name** and a **Table** id (e.g. `main`),
-   - tick **"Let an AI play this seat"**,
-   - pick a **Bot Difficulty** — Easy / Normal / Hard,
-   - click **Take a Seat**.
-4. The server seats a server-side AI opponent (named from the difficulty's name pool,
-   shown with a 🤖 badge + difficulty tooltip) and you keep a human seat.
-5. Click **Start Hand** — the bot auto-acts whenever it's its turn, with a short
-   "thinking" delay and a visible last-move note (action + confidence, full `reason` on hover).
-6. Act with the Check/Bet/Call/Raise/Fold buttons (min/max are computed by `@saloon/shared/bettingRules`).
+| Game | What happens |
+| ---- | ------------ |
+| **Cash game vs CPUs** | 1–8 CPU opponents (Easy / Normal / Hard / Mixed). Hands deal automatically; buy back in whenever you are out of chips. CPUs buy back in too. |
+| **Sit & Go tournament** | Everyone starts with the same stack, blinds rise every 8 hands, no rebuys. Eliminations are announced, and the final standings appear with a **Play again** button. |
+| **Play with friends** | Join or start a named table; anyone on the same network can sit at it. The join screen lists the tables running right now. |
+| **Just watch** | Spectate a table with every card visible and step through it one action at a time. |
 
-### AI-only table (auto-plays; good for spectating/testing)
+**Table options** (on the join screen): number of CPUs, CPU difficulty, blinds,
+starting chips (50 / 100 / 200 big blinds), shot clock (off / 15 / 30 / 60 s) and
+game speed.
 
-1. In a browser console (or any Socket.IO client), connect to `http://localhost:3000`
-   and emit `joinTable` for a bot seat, twice — the table becomes all-bots and starts
-   hands by itself:
+At the table:
 
-   ```js
-   const { io } = window; // or import 'socket.io-client'
-   const s1 = io('http://localhost:3000');
-   s1.emit('joinTable', { tableId: 'ai-only', name: 'Bot A', isBot: true, bot: { difficulty: 'hard' } });
-   const s2 = io('http://localhost:3000');
-   s2.emit('joinTable', { tableId: 'ai-only', name: 'Bot B', isBot: true, bot: { difficulty: 'normal' } });
-   ```
-2. Once ≥2 bot seats are filled, the server auto-deals the next hand and the bots
-   play it out autonomously (blinds, betting rounds, showdown) — no human needed.
-   A browser tab joined to the same table (even a human seat added before the last
-   bot) can watch; the hand only runs to completion when every seat is a bot.
-3. The server-side E2E test `server/tests/ai.test.js` exercises the same flow
-   (AI-only full hand to completion, chip conservation, mixed-table privacy).
+- **Actions:** Fold / Check-or-Call / Raise-to (becomes All-in at the max), with
+  Min · ½ · ⅔ · Pot · Max sizing, an exact amount box and a slider.
+  Keyboard: **F** fold, **C** check/call, **R** raise, **A** all in.
+- **Act in advance:** while others act, tick *Check / Fold*, *Check* or *Call any*
+  and it fires the moment your turn comes.
+- **Shot clock:** a ring runs down around the acting player. If it runs out you
+  check or fold; miss twice in a row and you are sat out (press *I'm back*).
+- **Sit out** any time from the HUD. In a tournament you stay dealt in and fold
+  automatically, as in a real one.
+- **Showdown:** hands that reach showdown are turned face up and named, the five
+  winning cards glow, and the pot slides to the winner. Side pots are shown when
+  someone is all in.
+- **Drawer** (chat, history, learn): CPU table talk and emotes, a per-table
+  leaderboard (net, hands won, biggest pot), your lifetime record, every past hand
+  with its full action, the tutorial, the hand-ranking guide and the odds helper.
+- **Settings:** language, sound, felt colour, four-colour deck, and your character.
 
-### Two-tab human vs human (Sprint 1 mode)
+### Your character
 
-Open two tabs of the UI, join the same table id with different names,
-and click **Start Hand** — then take turns with the betting controls.
+Build a western character (hat, hair, facial hair, eyes, skin, hat/hair colour,
+shirt, bandana, backdrop) or upload a photo. A character is a few small numbers,
+so it goes with you to every table and everyone else sees it. Players without
+one get a character generated from their name, and every CPU has its own face.
 
-## AI (Sprint 2)
+## CPU players
 
-- **Difficulty profiles** (`shared/src/ai/aiProfiles.js`): EASY (loose/passive,
-  bluffs often), NORMAL (hand strength + pot odds, sane patterns), HARD
-  (Monte-Carlo equity via `estimateWinTieLose`, position-aware, opponent-model
-  weights). Each has `personality.namePool`, `personality.avatarId`, and
-  `personality.sfxMap` (bet→chip, fold→flick, win→cheer, lose→grunt) for later sprints.
-- **Server-driven** (`server/src/index.js`): when the current actor is a bot, the server
-  calls `decideAction(game, botId, { seed, rng })` and applies it through the same
-  `applyAction` entry as humans — a per-table pump (one `setTimeout` tick per bot move,
-  coalesced) with a `BOT_LOOP_GUARD` cap. Humans are never auto-acted.
-- **Determinism**: every AI decision is seeded (per-table seed + hand/street/actor/
-  raiseCount/pot/currentBet/moveCount), so the same game line replays identically.
-- **Transparency**: each bot decision carries a human-readable `reason` and
-  `confidence` (broadcast via the `botAction` socket event) — the foundation of
-  Sprint 3's tutorial.
+- **Starting hands** are rated with the Chen formula and played from position:
+  tight up front, wider on the button, 3-bets with premiums, push/fold when short.
+- **After the flop** every CPU estimates its real equity with a fast Monte-Carlo
+  simulation against the players still in (more simulations at higher
+  difficulty), discounts it when facing a bet, and compares it with the pot odds.
+  Draws are semi-bluffed; value bets and continuation bets are sized to the pot.
+- **Opponent modelling:** CPUs remember how each player at the table plays (how
+  often they enter pots, raise and shove) and call wider against maniacs while
+  respecting tight players.
+- **Personalities:** Easy is a loose, passive calling station; Normal is solid;
+  Hard is tight-aggressive and position-aware. Each CPU's name nudges its style a
+  little, so no two play the same; hover the CPU tag to see it.
+- **Feel:** CPUs take human-like time to think (longer for big decisions), chat
+  after big pots, and show their last action on the table.
+- **Strength:** `scripts/ai-benchmark.mjs` plays thousands of 6-handed hands. Hard
+  wins clearly more than Normal, which wins more than Easy, and every difficulty
+  beats a player who shoves every hand or calls everything
+  (`shared/tests/aiStrength.test.js` guards this).
+- Every decision is seeded, so the same game line replays identically.
 
 ## i18n
 

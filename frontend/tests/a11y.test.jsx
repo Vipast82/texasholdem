@@ -86,7 +86,7 @@ describe('i18n a11y keys exist in both locales', () => {
 
 describe('roles + accessible names on key controls', () => {
   it('DealerButton exposes role=img with an accessible name', () => {
-    render(<DealerButton active seat='Sheriff' />);
+    render(<DealerButton active seat="Sheriff" />);
     const node = document.querySelector('.dealerbtn');
     expect(node).toBeTruthy();
     expect(node.getAttribute('role')).toBe('img');
@@ -95,7 +95,7 @@ describe('roles + accessible names on key controls', () => {
 
   it('EmoteBar is a labeled toolbar and every emote button has a name', () => {
     useGameStore.setState({ playerId: 'me' });
-    render(<EmoteBar playerId='me' />);
+    render(<EmoteBar playerId="me" />);
     const bar = document.querySelector('[role="toolbar"]');
     expect(bar).toBeTruthy();
     expect(bar.getAttribute('aria-label')).toBeTruthy();

@@ -30,11 +30,7 @@ export default function SpectatorBar() {
     <div className="spectatorbar" role="toolbar" aria-label={t('spectator.title')}>
       <span className="spectatorbar__label">{t('spectator.title')}</span>
       <label className="spectatorbar__toggle">
-        <input
-          type="checkbox"
-          checked={spectator.showAll}
-          onChange={(e) => setShowAll(e.target.checked)}
-        />
+        <input type="checkbox" checked={spectator.showAll} onChange={(e) => setShowAll(e.target.checked)} />
         <span>{t('spectator.showAll')}</span>
       </label>
       <button

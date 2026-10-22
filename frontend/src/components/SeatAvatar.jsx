@@ -55,6 +55,7 @@ function loadRemoteAvatar(id) {
 export default function SeatAvatar({ player, size = 44, isMe = false }) {
   // My uploaded avatar (client-side only). Bots need no binary.
   const myAvatar = useGameStore((s) => (s.avatar && s.avatar.url ? s.avatar : null));
+  const myLook = useGameStore((s) => s.profile.look);
 
   // Sprint 7 SHARING: for another human with an avatarId that is NOT my own,
   // fetch the shared avatar from the server so their seat shows their image.
@@ -86,10 +87,12 @@ export default function SeatAvatar({ player, size = 44, isMe = false }) {
     // Everyone without a picture gets their own seeded western character.
     const seed = (player && (player.name || player.id)) || 'stranger';
     const botSrc = (d) => characterSvg(seed, d);
+    // A character-creator look rides along in avatarMeta; mine comes from my profile.
+    const look = isMe ? myLook : meta && meta.kind === 'character' ? meta.look : null;
     let resolved = resolveAvatarView(player, {
       avatarById,
       botSrc,
-      defaultSrc: characterSvg(seed, 'normal')
+      defaultSrc: characterSvg(seed, 'normal', look)
     });
     // The LOCAL player is authoritative for their own avatar: if I have an
     // uploaded image, ALWAYS show it on my own seat, regardless of whether the
@@ -108,7 +111,7 @@ export default function SeatAvatar({ player, size = 44, isMe = false }) {
       resolved = { kind: 'upload', src: remoteUrl, crop: null, avatarId: metaId };
     }
     return resolved;
-  }, [player, myAvatar, isMe, remoteUrl, metaId]);
+  }, [player, myAvatar, myLook, meta, isMe, remoteUrl, metaId]);
 
   if (!view || !view.src) {
     return (

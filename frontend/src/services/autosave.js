@@ -18,16 +18,44 @@ export const PROFILE_DEFAULTS = {
   language: 'en',
   settings: {
     hud: false,
-    autoPersist: false
+    autoPersist: false,
+    fourColor: false, // four-colour deck (blue diamonds, green clubs)
+    felt: 'green'
   },
   sfx: {
     muted: false,
     volume: 0.8
   },
   avatarId: null,
+  look: null, // character-creator choices, or null for the default character
   lastSession: null,
-  handCount: 0
+  handCount: 0,
+  stats: { handsWon: 0, biggestPot: 0, tournamentsWon: 0 }
 };
+
+export const FELTS = ['green', 'blue', 'red', 'purple', 'black'];
+const LOOK_KEYS = [
+  'backdrop',
+  'skin',
+  'hat',
+  'hatColor',
+  'hair',
+  'hairColor',
+  'facial',
+  'shirt',
+  'bandana',
+  'eyes'
+];
+
+/** Keep only known character-creator fields with small whole-number values. */
+export function cleanLook(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const out = {};
+  for (const k of LOOK_KEYS) if (Number.isInteger(raw[k]) && raw[k] >= 0 && raw[k] < 32) out[k] = raw[k];
+  return Object.keys(out).length ? out : null;
+}
+
+const count = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.floor(Number(v)) : 0);
 
 /** Deep-merge a stored raw profile over the defaults (pure). */
 export function mergeProfile(raw) {
@@ -38,7 +66,9 @@ export function mergeProfile(raw) {
     language: src.language === 'es' || src.language === 'en' ? src.language : def.language,
     settings: {
       hud: !!(src.settings && src.settings.hud),
-      autoPersist: !!(src.settings && src.settings.autoPersist)
+      autoPersist: !!(src.settings && src.settings.autoPersist),
+      fourColor: !!(src.settings && src.settings.fourColor),
+      felt: src.settings && FELTS.includes(src.settings.felt) ? src.settings.felt : def.settings.felt
     },
     sfx: {
       muted: !!(src.sfx && src.sfx.muted),
@@ -48,8 +78,15 @@ export function mergeProfile(raw) {
           : def.sfx.volume
     },
     avatarId: typeof src.avatarId === 'string' && src.avatarId ? src.avatarId : null,
+    look: cleanLook(src.look),
     lastSession: src.lastSession && typeof src.lastSession === 'object' ? src.lastSession : null,
-    handCount: Number.isFinite(Number(src.handCount)) && Number(src.handCount) > 0 ? Number(src.handCount) : 0
+    handCount:
+      Number.isFinite(Number(src.handCount)) && Number(src.handCount) > 0 ? Number(src.handCount) : 0,
+    stats: {
+      handsWon: count(src.stats && src.stats.handsWon),
+      biggestPot: count(src.stats && src.stats.biggestPot),
+      tournamentsWon: count(src.stats && src.stats.tournamentsWon)
+    }
   };
 }
 
@@ -135,6 +172,14 @@ export class AutosaveService {
     const base = serializeProfile({ ...stored, ...profile });
     base.handCount = (stored.handCount || 0) + 1;
     base.lastSession = buildSessionSnapshot(payload, playerId, tableId);
+    // Lifetime record: hands won and the biggest pot you ever took.
+    const won = payload && payload.payouts && Number(payload.payouts[playerId]);
+    const prev = stored.stats || { handsWon: 0, biggestPot: 0, tournamentsWon: 0 };
+    base.stats = {
+      ...prev,
+      handsWon: prev.handsWon + (won > 0 ? 1 : 0),
+      biggestPot: Math.max(prev.biggestPot, won > 0 ? won : 0)
+    };
     return this.saveProfile(base);
   }
 

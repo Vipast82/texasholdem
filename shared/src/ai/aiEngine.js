@@ -2,7 +2,9 @@ import { minRaise, maxBet, maxRaisesPerStreet } from '../bettingRules.js';
 import { parseCard } from '../cards.js';
 import { Rng } from '../rng.js';
 import { rankCandidates, monteCarloEquity, handStrength } from './aiDecision.js';
-import { getProfile } from './aiProfiles.js';
+import { getProfile, personaFor } from './aiProfiles.js';
+import { readOf } from './opponentModel.js';
+import { estimateWinTieLose } from './aiMonteCarlo.js';
 
 /**
  * Top-level AI engine.
@@ -85,7 +87,38 @@ export function normalizeState(game, actorId) {
   const street = game.street;
   const committed = actor.contributions[street] || 0;
   const toCall = Math.max(0, game.currentBet - committed);
-  const playersRemaining = game.players.filter((p) => p.status === 'in-hand' && !p.hasFolded).length;
+  const live = game.players.filter((p) => p.status === 'in-hand' && !p.hasFolded);
+  const playersRemaining = live.length;
+  // 0 = first to act after the flop, 1 = last (the button).
+  const order = live.map((p) => p.seat).sort((a, b) => a - b);
+  const startIdx = order.findIndex((s) => s > game.dealerSeat);
+  const rotated = startIdx < 0 ? order : [...order.slice(startIdx), ...order.slice(0, startIdx)];
+  const posScore = rotated.length > 1 ? rotated.indexOf(actor.seat) / (rotated.length - 1) : 1;
+  // Were we the last one to bet or raise on an earlier street?
+  const log = Array.isArray(game.actionLog) ? game.actionLog : [];
+  const lastAggro = [...log]
+    .reverse()
+    .find((a) => a.street !== street && (a.action === 'bet' || a.action === 'raise' || a.action === 'allin'));
+  const wasAggressor = !!lastAggro && lastAggro.playerId === actorId;
+  // Who made the bet we are facing on this street (null if nobody has).
+  const facing = [...log]
+    .reverse()
+    .find(
+      (a) =>
+        a.street === street &&
+        a.playerId !== actorId &&
+        (a.action === 'bet' || a.action === 'raise' || a.action === 'allin')
+    );
+  const bettorId = facing ? facing.playerId : null;
+  const limpers =
+    street === 'preflop' && game.raiseCount === 0
+      ? Math.max(
+          0,
+          game.players.filter(
+            (p) => p.id !== actorId && p.status === 'in-hand' && p.contributions.preflop === game.currentBet
+          ).length - 1
+        )
+      : 0;
   return {
     hole: actor.holeCards,
     community: game.community,
@@ -102,6 +135,10 @@ export function normalizeState(game, actorId) {
     raiseCount: game.raiseCount,
     maxRaises: maxRaisesPerStreet(game.gameType, street),
     playersRemaining,
+    posScore,
+    wasAggressor,
+    bettorId,
+    limpers,
     position: positionFor(game, actor.seat),
     boardTexture: boardTexture(game.community)
   };
@@ -170,21 +207,15 @@ function legalize(state, action, amount) {
   return { action: 'check', amount: 0 };
 }
 
-/** Build a human-readable reason string from the inputs the AI used. */
-function buildReason(state, action, strength, profile) {
-  const parts = [];
+/** A short, plain-language reason for the chosen action. */
+function buildReason(state, action, chosen, strength) {
+  if (chosen.why && chosen.action === action) return chosen.why;
   const pct = Math.round(strength * 100);
-  if (action === 'fold') parts.push(`weak hand (~${pct}%) vs ${state.toCall} to call`);
-  else if (action === 'check') parts.push('no bet out; conserving chips');
-  else if (action === 'call') parts.push(`value call: ~${pct}% strength vs pot odds`);
-  else if (action === 'allin') parts.push(`committed ~${pct}%; shoving ${state.pot} pot`);
-  else parts.push(`value ${action}: ~${pct}% strength into a ${state.pot} pot`);
-  if (state.boardTexture.flushDraw) parts.push('flush draw');
-  if (state.boardTexture.straightDraw) parts.push('straight draw');
-  if (state.boardTexture.paired) parts.push('paired board');
-  parts.push(`position: ${state.position}`);
-  if (profile.difficulty === 'hard') parts.push('monte-carlo equity considered');
-  return parts.join('; ');
+  if (action === 'fold') return `not strong enough (~${pct}%) to call ${state.toCall}`;
+  if (action === 'check') return 'no bet to face: check';
+  if (action === 'call') return `~${pct}% to win: call`;
+  if (action === 'allin') return `~${pct}% to win: all in`;
+  return `~${pct}% to win: ${action}`;
 }
 
 /**
@@ -200,7 +231,8 @@ function buildReason(state, action, strength, profile) {
  * @returns {{action:string, amount?:number, reason?:string, confidence?:number, meta?:object}}
  */
 export function decideAction(game, actorId, opts = {}) {
-  const profile = opts.profile || getProfile(opts.difficulty || 'normal');
+  const base = opts.profile || getProfile(opts.difficulty || 'normal');
+  const profile = personaFor(base, opts.persona);
   if (!opts.rng && (opts.seed === undefined || opts.seed === null)) {
     throw new Error('decideAction requires a seed or an injected Rng (determinism)');
   }
@@ -209,30 +241,41 @@ export function decideAction(game, actorId, opts = {}) {
   const state = normalizeState(game, actorId);
   const strength = handStrength(state);
 
-  // HARD refines the decision with Monte-Carlo equity.
+  // After the flop every CPU estimates its real equity against the players
+  // still in; the iteration count (and so the accuracy) grows with difficulty.
+  // What we know about the player whose bet we face (opponent modelling).
+  const reads = opts.reads || null;
+  state.bettorWidth = readOf(state.bettorId && reads ? reads[state.bettorId] : null).betWidth;
+
   let equity = null;
-  let effectiveStrength = strength;
-  if (profile.difficulty === 'hard') {
-    equity = monteCarloEquity(state, profile, opts.seed);
-    effectiveStrength = strength * 0.5 + equity.win * 0.5;
-    state.effectiveStrength = effectiveStrength;
+  if (state.community.length >= 3) {
+    equity = monteCarloEquity(state, profile, `${opts.seed ?? 'rng'}:${state.street}`);
+    state.equity = equity.win + equity.tie / 2;
+  } else if (state.toCall > 0 && state.toCall >= (state.chips + state.committed) * 0.2) {
+    // Facing a big preflop bet: work out real heads-up equity before deciding.
+    equity = estimateWinTieLose(
+      state.hole,
+      [],
+      `${opts.seed ?? 'rng'}:pre`,
+      Math.min(400, profile.mcIterations || 200),
+      1
+    );
+    state.equity = equity.win + equity.tie / 2;
   }
 
   const candidates = rankCandidates(state, profile, rng);
-  const chosen = candidates.length ? candidates[0] : { action: 'check', weight: 0, amount: 0 };
-
+  const chosen = candidates.length ? candidates[0] : { action: 'check', weight: 0, amount: 0, why: '' };
   const legal = legalize(state, chosen.action, chosen.amount);
-  const confidence = Math.min(
-    1,
-    Math.max(0, effectiveStrength * (legal.action === 'check' || legal.action === 'fold' ? 0.85 : 1))
-  );
+  const effective = typeof state.equity === 'number' ? state.equity : strength;
+  const confidence = Math.min(1, Math.max(0, Math.abs(effective - 0.5) * 2 * 0.6 + chosen.weight * 0.4));
   return {
     action: legal.action,
     amount: legal.amount,
-    reason: buildReason(state, legal.action, effectiveStrength, profile),
+    reason: buildReason(state, legal.action, chosen, effective),
     confidence,
     meta: {
       profile: profile.difficulty,
+      style: profile.style,
       strength,
       equity,
       position: state.position,

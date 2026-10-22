@@ -4,12 +4,7 @@ import { Rng } from '../src/rng.js';
 import { DIFFICULTIES, getProfile, pickBotName } from '../src/ai/aiProfiles.js';
 import { estimateWinTieLose } from '../src/ai/aiMonteCarlo.js';
 import { handStrength, potOddsRequired, rankCandidates } from '../src/ai/aiDecision.js';
-import {
-  decideAction,
-  positionFor,
-  boardTexture,
-  normalizeState
-} from '../src/ai/aiEngine.js';
+import { decideAction, positionFor, boardTexture, normalizeState } from '../src/ai/aiEngine.js';
 
 const ALICE = 'alice';
 const BOB = 'bob';

@@ -29,15 +29,11 @@ describe('server end-to-end', () => {
       socket.on('connect_error', reject);
     });
 
-  const ack = (socket, event, payload = {}) =>
-    new Promise((resolve) => socket.emit(event, payload, resolve));
+  const ack = (socket, event, payload = {}) => new Promise((resolve) => socket.emit(event, payload, resolve));
 
   it('two clients complete a full hand to showdown and chips are conserved', async () => {
     const tableId = `t-${Date.now()}`;
-    const [a, b] = await Promise.all([
-      join(ioUrl, tableId, 'Alice'),
-      join(ioUrl, tableId, 'Bob')
-    ]);
+    const [a, b] = await Promise.all([join(ioUrl, tableId, 'Alice'), join(ioUrl, tableId, 'Bob')]);
     const alice = a.socket;
     const bob = b.socket;
     const aliceId = a.playerId;
@@ -53,8 +49,6 @@ describe('server end-to-end', () => {
     const startRes = await ack(alice, 'startHand');
     expect(startRes.ok).toBe(true);
     expect(startRes.snapshot.inHand).toBe(true);
-
-
 
     // Drive the hand with the cheapest legal action (check/call) until it ends.
     // We advance off the authoritative per-action ack snapshot, whose betting
@@ -91,9 +85,11 @@ describe('server end-to-end', () => {
     const total = finalA.players.reduce((sum, p) => sum + p.chips, 0) + finalA.pot;
     expect(total).toBe(finalA.startingStack * 2);
 
-    // Alice never sees Bob's hole cards in her own view.
+    // Both players checked it down to showdown, so Bob's hand is now turned
+    // face up for Alice (during the hand it was hidden).
     const bobInAlice = finalA.players.find((p) => p.name === 'Bob');
-    expect(bobInAlice.holeCards).toBeNull();
+    expect(bobInAlice.holeCards).toHaveLength(2);
+    expect(startRes.snapshot.players.find((p) => p.name === 'Bob').holeCards).toBeNull();
     // ... and her own hole cards ARE visible to her.
     const aliceInAlice = finalA.players.find((p) => p.name === 'Alice');
     expect(aliceInAlice.holeCards).toHaveLength(2);
@@ -146,8 +142,7 @@ describe('server spectator + history (Sprint 4)', () => {
       socket.on('connect_error', reject);
     });
 
-  const ack = (socket, event, payload = {}) =>
-    new Promise((resolve) => socket.emit(event, payload, resolve));
+  const ack = (socket, event, payload = {}) => new Promise((resolve) => socket.emit(event, payload, resolve));
 
   it('spectator sees all hole cards; a live player never does', async () => {
     const tableId = `spec-${Date.now()}`;
@@ -271,20 +266,24 @@ describe('server avatar sharing (Sprint 7)', () => {
     server.close();
   });
 
+  // Capture every state push from the moment of joining (a push can arrive
+  // before the join reply), so tests always have the latest view.
   const join = (url, tableId, name) =>
     new Promise((resolve, reject) => {
       const socket = Client(url, { transports: ['websocket'] });
+      const seat = { socket, playerId: null, view: null };
+      socket.on('state', (v) => (seat.view = v));
       socket.on('connect', () =>
         socket.emit('joinTable', { tableId, name }, (res) => {
-          if (res.ok) resolve({ socket, playerId: res.playerId });
-          else reject(new Error(res.error));
+          if (!res.ok) return reject(new Error(res.error));
+          seat.playerId = res.playerId;
+          resolve(seat);
         })
       );
       socket.on('connect_error', reject);
     });
 
-  const ack = (socket, event, payload = {}) =>
-    new Promise((resolve) => socket.emit(event, payload, resolve));
+  const ack = (socket, event, payload = {}) => new Promise((resolve) => socket.emit(event, payload, resolve));
 
   it('updating the avatar after joining updates the OTHER seat snapshot; clearing resets it', async () => {
     const tableId = `av-${Date.now()}`;
@@ -293,16 +292,13 @@ describe('server avatar sharing (Sprint 7)', () => {
 
     // Each client captures the latest server push (state is per-viewer; the
     // avatarMeta of the OPPOSITE seat is shared by every viewer).
-    let aliceView = null;
-    let bobView = null;
-    alice.socket.on('state', (s) => (aliceView = s));
-    bob.socket.on('state', (s) => (bobView = s));
+    const view = (seat) => seat.view;
 
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
     // Baseline: nobody joined with an avatar, so both seats are null.
     await wait(50);
-    const aliceBaseline = aliceView.players.find((p) => p.id === alice.playerId);
+    const aliceBaseline = view(alice).players.find((p) => p.id === alice.playerId);
     expect(aliceBaseline.avatarMeta || null).toBeNull();
 
     // Alice picks a NEW avatar after joining. The blob lives in /avatars/:id
@@ -317,20 +313,20 @@ describe('server avatar sharing (Sprint 7)', () => {
     await wait(50);
 
     // BOB (the other seat) must now see Alice's new avatarMeta on her player.
-    const aliceInBob = bobView.players.find((p) => p.id === alice.playerId);
+    const aliceInBob = view(bob).players.find((p) => p.id === alice.playerId);
     expect(aliceInBob.avatarMeta).toBeTruthy();
     expect(aliceInBob.avatarMeta.avatarId).toBe(newId);
     expect(aliceInBob.avatarMeta.kind).toBe('upload');
 
     // And Alice's own view is consistent with what the server stored.
-    const aliceInAlice = aliceView.players.find((p) => p.id === alice.playerId);
+    const aliceInAlice = view(alice).players.find((p) => p.id === alice.playerId);
     expect(aliceInAlice.avatarMeta.avatarId).toBe(newId);
 
     // Reset (clear) must propagate to the other seat too.
     const clr = await ack(alice.socket, 'updateAvatar', { avatarMeta: null });
     expect(clr.ok).toBe(true);
     await wait(50);
-    const clearedInBob = bobView.players.find((p) => p.id === alice.playerId);
+    const clearedInBob = view(bob).players.find((p) => p.id === alice.playerId);
     expect(clearedInBob.avatarMeta || null).toBeNull();
 
     alice.socket.close();

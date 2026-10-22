@@ -79,12 +79,7 @@ export default function TutorialPanel() {
     <section className="tutorial" aria-label={t('tutorial.panel')}>
       <div className="tutorial__head">
         <h2>{t('tutorial.panel')}</h2>
-        <button
-          className="btn btn--primary"
-          type="button"
-          onClick={runSeeded}
-          disabled={running || !tableId}
-        >
+        <button className="btn btn--primary" type="button" onClick={runSeeded} disabled={running || !tableId}>
           {running ? t('settings.runningTutorial') : t('settings.runTutorial')}
         </button>
       </div>
@@ -172,10 +167,7 @@ function renderHint(item) {
       <strong>{t('tutorial.hint')}:</strong> {actionLabel}
       {hint.reason ? <em> — {hint.reason}</em> : null}
       {hint.confidence != null ? (
-        <>
-          {' '}
-          ({t('tutorial.confidence', { n: Math.round(hint.confidence * 100) })})
-        </>
+        <> ({t('tutorial.confidence', { n: Math.round(hint.confidence * 100) })})</>
       ) : null}
     </div>
   );
