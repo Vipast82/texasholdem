@@ -16,7 +16,30 @@
 
 import { getProfile } from '@saloon/shared/ai/aiProfiles';
 
-export const SFX_NAMES = ['chip', 'flick', 'cheer', 'grunt', 'shuffle', 'deal', 'flip', 'chips'];
+export const SFX_NAMES = [
+  'chip',
+  'flick',
+  'cheer',
+  'grunt',
+  'shuffle',
+  'deal',
+  'flip',
+  'chips',
+  // Your turn + the shot clock.
+  'turn',
+  'tick',
+  // Table moments (western samples, several variants each).
+  'bigWin',
+  'badBeat',
+  'allin',
+  'join',
+  'leave',
+  'blinds',
+  'eliminated',
+  'rebuy',
+  'spittoon',
+  'victory'
+];
 
 /**
  * Real audio samples (shipped in `public/assets/sfx/`, resolved relative to the
@@ -28,8 +51,29 @@ export const SAMPLES = {
   deal: { file: 'deal.mp3', volume: 1.0 },
   flip: { file: 'card-flip.mp3', volume: 0.9 },
   chips: { file: 'chips.mp3', volume: 1.0 },
-  chip: { file: 'poker-chip.mp3', volume: 0.8 }
+  chip: { file: 'poker-chip.mp3', volume: 0.8 },
+  // Winning a pot: a different flourish each time (no more synth scream).
+  cheer: { files: ['win-coins.mp3', 'win-pizzicato.mp3', 'win-steel.mp3'], volume: 0.8 },
+  grunt: { files: ['lose-pizzicato.mp3', 'lose-sting.mp3'], volume: 0.7 },
+  bigWin: { files: ['win-crowd.mp3'], volume: 0.8 },
+  badBeat: { files: ['lose-sax.mp3'], volume: 0.75 },
+  allin: { files: ['allin-cock.mp3', 'allin-cock.mp3', 'horse.mp3'], volume: 0.8 },
+  join: { files: ['join-clink.mp3'], volume: 0.6 },
+  leave: { files: ['doors.mp3'], volume: 0.6 },
+  blinds: { files: ['triangle.mp3'], volume: 0.6 },
+  eliminated: { files: ['tumbleweed.mp3'], volume: 0.6 },
+  rebuy: { files: ['whiskey.mp3'], volume: 0.7 },
+  spittoon: { files: ['spittoon.mp3'], volume: 0.8 },
+  victory: { files: ['victory.mp3'], volume: 0.8 }
 };
+
+/** The sample file to use for a sound (picks a random variant when there are several). */
+export function sampleFile(name, random = Math.random) {
+  const sample = SAMPLES[name];
+  if (!sample) return null;
+  if (sample.file) return sample.file;
+  return sample.files[Math.floor(random() * sample.files.length)];
+}
 
 /** Default (human) action -> sfx map. Mirrors the aiProfiles SHARED_SFX intent. */
 export const DEFAULT_SFX_MAP = {
@@ -59,9 +103,7 @@ export function resolveActionSound(payload) {
   if (!payload || !payload.action) return null;
   const snap = payload.snapshot;
   const actor =
-    snap && Array.isArray(snap.players)
-      ? snap.players.find((p) => p.id === payload.playerId)
-      : null;
+    snap && Array.isArray(snap.players) ? snap.players.find((p) => p.id === payload.playerId) : null;
   if (actor && actor.isBot) {
     return soundForBotAction(payload.action, actor.bot && actor.bot.difficulty);
   }
@@ -146,7 +188,8 @@ export class SfxService {
         handled = false; // never let audio break the game
       }
     }
-    if (!handled) this._synth(name);
+    // Win sounds are clips only: the old synth whoop was too shrill.
+    if (!handled && !SAMPLE_ONLY.has(name)) this._synth(name);
     return { played: true, name };
   }
 
@@ -174,9 +217,12 @@ export class SfxService {
       osc.start(now);
       osc.stop(now + preset.dur + 0.02);
       // Let the short blip finish, then release the context.
-      setTimeout(() => {
-        if (ctx.state !== 'closed') ctx.close().catch(() => {});
-      }, Math.round(preset.dur * 1000) + 60);
+      setTimeout(
+        () => {
+          if (ctx.state !== 'closed') ctx.close().catch(() => {});
+        },
+        Math.round(preset.dur * 1000) + 60
+      );
     } catch (err) {
       // Audio is strictly best-effort; never break the game.
     }
@@ -187,15 +233,25 @@ function clamp01(n) {
   return Math.max(0, Math.min(1, n));
 }
 
+/** Sounds that stay silent rather than fall back to a synth tone. */
+const SAMPLE_ONLY = new Set(['cheer', 'bigWin', 'victory']);
+
 const SYNTH_PRESETS = {
   chip: { wave: 'square', from: 660, to: 990, dur: 0.08, amp: 0.5 },
   flick: { wave: 'triangle', from: 320, to: 180, dur: 0.06, amp: 0.4 },
-  cheer: { wave: 'sawtooth', from: 392, to: 784, dur: 0.3, amp: 0.6 },
-  grunt: { wave: 'sawtooth', from: 150, to: 70, dur: 0.25, amp: 0.5 },
+  grunt: { wave: 'triangle', from: 220, to: 150, dur: 0.25, amp: 0.3 },
   shuffle: { wave: 'square', from: 180, to: 120, dur: 0.2, amp: 0.35 },
   deal: { wave: 'triangle', from: 500, to: 240, dur: 0.1, amp: 0.45 },
   flip: { wave: 'triangle', from: 700, to: 300, dur: 0.12, amp: 0.45 },
   chips: { wave: 'square', from: 880, to: 1320, dur: 0.28, amp: 0.6 },
+  badBeat: { wave: 'triangle', from: 300, to: 150, dur: 0.4, amp: 0.4 },
+  allin: { wave: 'square', from: 200, to: 120, dur: 0.08, amp: 0.4 },
+  join: { wave: 'triangle', from: 900, to: 1200, dur: 0.08, amp: 0.25 },
+  leave: { wave: 'triangle', from: 600, to: 400, dur: 0.1, amp: 0.25 },
+  blinds: { wave: 'triangle', from: 1400, to: 1400, dur: 0.3, amp: 0.3 },
+  eliminated: { wave: 'sine', from: 500, to: 250, dur: 0.5, amp: 0.3 },
+  rebuy: { wave: 'triangle', from: 700, to: 900, dur: 0.15, amp: 0.3 },
+  spittoon: { wave: 'triangle', from: 1200, to: 900, dur: 0.12, amp: 0.3 },
   // A soft two-note chime when the action reaches you, and the clock tick.
   turn: { wave: 'sine', from: 660, to: 880, dur: 0.18, amp: 0.35 },
   tick: { wave: 'sine', from: 1200, to: 1100, dur: 0.04, amp: 0.25 }
@@ -218,11 +274,12 @@ export function browserSound(name, volume) {
   if (typeof Audio === 'undefined') return undefined;
   const vol = clamp01(volume || 0.8) * (sample.volume || 1);
   if (vol <= 0) return true; // muted-by-volume: count as "handled" (silence)
-  let audio = _audioCache.get(name);
+  const file = sampleFile(name);
+  let audio = _audioCache.get(file);
   if (!audio) {
-    audio = new Audio(`/assets/sfx/${sample.file}`);
+    audio = new Audio(`/assets/sfx/${file}`);
     audio.preload = 'auto';
-    _audioCache.set(name, audio);
+    _audioCache.set(file, audio);
   }
   try {
     audio.volume = vol;

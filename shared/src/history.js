@@ -83,7 +83,7 @@ export function buildHandRecord(game, opts = {}) {
     winnerIds: winners,
     rankedHand: ranked ? summarizeRanked(ranked) : null,
     payouts: showdown && showdown.payouts ? Object.assign({}, showdown.payouts) : game.payouts || {},
-    potAtEnd: game.lastPot != null ? game.lastPot : (game.pot || 0),
+    potAtEnd: game.lastPot != null ? game.lastPot : game.pot || 0,
     actions: (game.actionLog || []).map((a) => ({
       playerId: a.playerId,
       action: a.action,

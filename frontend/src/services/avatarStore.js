@@ -52,12 +52,18 @@ export function validateAvatarFile(file) {
  */
 export function makeAvatarId(seed) {
   if (seed != null && String(seed).length > 0) {
-    const slug = String(seed).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    const slug = String(seed)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
     return `user-${slug || 'default'}`;
   }
-  const rand = typeof crypto !== 'undefined' && crypto.getRandomValues
-    ? Array.from(crypto.getRandomValues(new Uint8Array(4))).map((b) => (b % 36).toString(36)).join('')
-    : Math.random().toString(36).slice(2, 8);
+  const rand =
+    typeof crypto !== 'undefined' && crypto.getRandomValues
+      ? Array.from(crypto.getRandomValues(new Uint8Array(4)))
+          .map((b) => (b % 36).toString(36))
+          .join('')
+      : Math.random().toString(36).slice(2, 8);
   return `user-${Date.now().toString(36)}-${rand}`;
 }
 
@@ -72,8 +78,7 @@ const COWBOY_EXPRESSIONS = {
   easy: {
     brows:
       '<path d="M40 42 Q46 38 52 42" stroke="#5a3a24" fill="none" stroke-width="2"/><path d="M52 42 Q58 38 64 42" stroke="#5a3a24" fill="none" stroke-width="2"/>',
-    eyes:
-      '<circle cx="46" cy="52" r="6" fill="#fff"/><circle cx="54" cy="52" r="6" fill="#fff"/><circle cx="47" cy="53" r="2.5" fill="#2b1c12"/><circle cx="55" cy="53" r="2.5" fill="#2b1c12"/>',
+    eyes: '<circle cx="46" cy="52" r="6" fill="#fff"/><circle cx="54" cy="52" r="6" fill="#fff"/><circle cx="47" cy="53" r="2.5" fill="#2b1c12"/><circle cx="55" cy="53" r="2.5" fill="#2b1c12"/>',
     mouth: '<path d="M44 70 Q50 82 56 70" fill="#7a2e20" stroke="#5a3a24" stroke-width="1.5"/>'
   },
   normal: {
@@ -85,8 +90,7 @@ const COWBOY_EXPRESSIONS = {
   hard: {
     brows:
       '<line x1="41" y1="46" x2="51" y2="44" stroke="#5a3a24" stroke-width="2.5"/><line x1="59" y1="46" x2="51" y2="44" stroke="#5a3a24" stroke-width="2.5"/>',
-    eyes:
-      '<path d="M42 51 L50 53" stroke="#2b1c12" stroke-width="2.5"/><path d="M58 51 L50 53" stroke="#2b1c12" stroke-width="2.5"/>',
+    eyes: '<path d="M42 51 L50 53" stroke="#2b1c12" stroke-width="2.5"/><path d="M58 51 L50 53" stroke="#2b1c12" stroke-width="2.5"/>',
     mouth: '<line x1="44" y1="72" x2="56" y2="72" stroke="#5a3a24" stroke-width="2.5"/>'
   }
 };
@@ -202,4 +206,3 @@ export class AvatarStore {
 
 /** Default singleton (uses the browser IndexedDB + URL.createObjectURL). */
 export const avatarStore = new AvatarStore();
-

@@ -34,7 +34,7 @@ export default function ChatPanel() {
       >
         {chat.length === 0 && <p className="empty">{t('chat.empty')}</p>}
         {chat.map((m) => (
-          <p key={`${m.ts}-${m.from}`} className="chat__msg">
+          <p key={`${m.ts}-${m.from}`} className={`chat__msg${m.bot ? ' chat__msg--talk' : ''}`}>
             <span className="chat__from">{m.from}</span> {m.text}
           </p>
         ))}

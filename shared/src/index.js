@@ -9,13 +9,8 @@ export { GameTable } from './gameEngine.js';
 export { getProfile, DIFFICULTIES, pickBotName, personaFor, styleLabel } from './ai/aiProfiles.js';
 export { emptyStats, recordHand as recordOpponentHand, readOf } from './ai/opponentModel.js';
 export { estimateWinTieLose } from './ai/aiMonteCarlo.js';
-export { handStrength, potOddsRequired, rankCandidates } from './ai/aiDecision.js';
-export {
-  decideAction,
-  positionFor,
-  boardTexture,
-  normalizeState
-} from './ai/aiEngine.js';
+export { handStrength, potOddsRequired, rankCandidates, chenScore } from './ai/aiDecision.js';
+export { decideAction, positionFor, boardTexture, normalizeState } from './ai/aiEngine.js';
 export { strategyHint } from './tutorialHint.js';
 
 // Sprint 4 - HUD equity (thin wrapper over the single Monte-Carlo) + hand history.
@@ -27,3 +22,6 @@ export {
   MIN_EQUITY_ITERATIONS
 } from './equity.js';
 export { buildHandRecord, serializeHandRecord } from './history.js';
+
+// Table talk: CPU heckles/brags, announcer and dealer lines (audio + text).
+export * from './voiceLines.js';

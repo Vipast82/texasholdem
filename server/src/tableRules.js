@@ -113,24 +113,3 @@ export function dealDelayMs({ speed = 'normal', showdown = false, first = false 
   const base = speed === 'fast' ? 2500 : 4000;
   return base + (showdown ? 1500 : 0);
 }
-
-const LINES = {
-  win: [
-    'Yee-haw!',
-    "Pleasure doin' business.",
-    "Read 'em and weep.",
-    'Much obliged, partners.',
-    "The cards don't lie.",
-    "That's how we do it out west."
-  ],
-  bigLoss: ["Well, I'll be...", 'Dang river.', 'That stings worse than a scorpion.', 'Next time, partner.'],
-  busted: ["I'm plumb out. Good game, folks.", "Reckon I'll mosey on.", 'Cleaned me out, fair and square.'],
-  greet: ['Howdy, partners.', "Evenin'.", 'Deal me in.', 'Mind if I sit a spell?']
-};
-
-/** A line of CPU table talk for a moment, or null to stay quiet. */
-export function botLine(kind, random = Math.random) {
-  const lines = LINES[kind];
-  if (!lines) return null;
-  return lines[Math.floor(random() * lines.length)];
-}

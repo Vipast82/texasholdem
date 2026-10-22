@@ -19,7 +19,8 @@
     "./ai/aiEngine": "./src/ai/aiEngine.js",
     "./tutorialHint": "./src/tutorialHint.js",
     "./equity": "./src/equity.js",
-    "./history": "./src/history.js"
+    "./history": "./src/history.js",
+    "./voiceLines": "./src/voiceLines.js"
   },
   "scripts": {
     "test": "vitest run"

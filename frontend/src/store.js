@@ -3,6 +3,7 @@ import { socket, emitAck } from './socket.js';
 import { avatarStore } from './services/avatarStore.js';
 import { AutosaveService, PROFILE_DEFAULTS } from './services/autosave.js';
 import { sfxService, resolveActionSound } from './services/sfxService.js';
+import { voicePlayer, musicPlayer, voicePath } from './services/audioService.js';
 import { autoEmoteForEvent, validateEmote, emoteGlyph } from './services/emoteService.js';
 import { setLocale as applyModuleLocale } from './i18n.js';
 
@@ -51,6 +52,7 @@ const TABLE_STATE = () => ({
   spectator: { ...SPECTATOR_DEFAULTS },
   history: { ...HISTORY_DEFAULTS },
   emotes: {},
+  speech: {}, // playerId -> { text, ts }: what a CPU just said (bubble over its seat)
   snapshotAt: 0, // local time the last snapshot arrived (for countdowns)
   toasts: [],
   preAction: null // { kind: 'checkfold' | 'check' | 'callany', hand, street, bet }
@@ -77,12 +79,21 @@ const initialState = {
 
   // Sprint 5 — profile / avatars / sound (all client-side; see services/)
   profile: { ...PROFILE_DEFAULTS }, // autosaved profile (name, botDifficulty, tutorialSeen)
-  sfx: { muted: false, volume: 0.8 }, // mirrors sfxService; persisted inside profile
+  sfx: {
+    muted: false,
+    volume: 0.8,
+    voiceVolume: 0.9,
+    music: true,
+    musicVolume: 0.35,
+    talk: true,
+    dealerCalls: false
+  },
   // My own uploaded avatar (I am the only client that holds the binary).
   avatar: { id: null, url: null, crop: null, srcW: null, srcH: null },
   avatarBusy: false,
   avatarError: null,
 
+  radio: { station: 'KSAL Saloon Radio', track: null, playing: false, enabled: true },
   // Sprint 6 — emote bubbles (local-only, no server round-trip)
   emotes: {}, // { [playerId]: { code, glyph, ts } }
   _emoteTimers: {}
@@ -96,19 +107,50 @@ const initialState = {
  * would use its own sfxMap (kept here for parity; hand-end is player-scoped).
  * @returns {string|null} 'cheer' | 'grunt' | null
  */
-function handEndSoundForMe(payload, playerId) {
-  const winners = Array.isArray(payload.winnerIds)
-    ? payload.winnerIds
-    : payload.winnerId
-      ? [payload.winnerId]
-      : [];
-  const me =
-    payload.snapshot && Array.isArray(payload.snapshot.players)
-      ? payload.snapshot.players.find((p) => p.id === playerId)
-      : null;
-  const participated = me && (me.hasFolded || me.holeCards || me.contributions);
-  if (!participated) return null; // not in this hand — stay silent
-  return winners.includes(playerId) ? 'cheer' : 'grunt';
+export function handEndSoundForMe(payload, playerId) {
+  const snap = payload.snapshot;
+  const bb = (snap && snap.bigBlind) || 20;
+  const won = payload.payouts && Number(payload.payouts[playerId]);
+  // A big pot gets the crowd; a small one gets a register, coins or piano.
+  if (won > 0) return won >= bb * 30 ? 'bigWin' : 'cheer';
+  // Lost a showdown you were in (folding is its own reward: silence).
+  const shown = snap && snap.lastShowdown && snap.lastShowdown.all;
+  if (!shown || !shown[playerId]) return null;
+  const me = snap.players.find((p) => p.id === playerId);
+  const c = (me && me.contributions) || {};
+  const put = (c.preflop || 0) + (c.flop || 0) + (c.turn || 0) + (c.river || 0);
+  return put >= bb * 30 ? 'badBeat' : 'grunt';
+}
+
+export const SOUND_DEFAULTS = {
+  muted: false,
+  volume: 0.8, // effects
+  voiceVolume: 0.9,
+  music: true,
+  musicVolume: 0.35,
+  talk: true, // CPU heckles and brags out loud
+  dealerCalls: false // the dealer calls every action
+};
+
+/** Clean sound settings and push them into the players. Returns the clean copy. */
+function applySound(raw = {}) {
+  const vol = (v, d) => (Number.isFinite(Number(v)) ? Math.max(0, Math.min(1, Number(v))) : d);
+  const sfx = {
+    muted: !!raw.muted,
+    volume: vol(raw.volume, SOUND_DEFAULTS.volume),
+    voiceVolume: vol(raw.voiceVolume, SOUND_DEFAULTS.voiceVolume),
+    music: raw.music === undefined ? SOUND_DEFAULTS.music : !!raw.music,
+    musicVolume: vol(raw.musicVolume, SOUND_DEFAULTS.musicVolume),
+    talk: raw.talk === undefined ? SOUND_DEFAULTS.talk : !!raw.talk,
+    dealerCalls: !!raw.dealerCalls
+  };
+  sfxService.setMuted(sfx.muted);
+  sfxService.setVolume(sfx.volume);
+  voicePlayer.setMuted(sfx.muted);
+  voicePlayer.setVolume(sfx.voiceVolume);
+  musicPlayer.setVolume(sfx.musicVolume);
+  musicPlayer.setEnabled(sfx.music && !sfx.muted);
+  return sfx;
 }
 
 export const useGameStore = create((set, get) => ({
@@ -136,10 +178,20 @@ export const useGameStore = create((set, get) => ({
         set({ _tourCounted: key });
       }
     }
+    const headsUpFinal = tour && !tour.finished && snapshot.players.filter((p) => p.chips > 0).length === 2;
+    musicPlayer.setMood(headsUpFinal ? 'showdown' : 'saloon');
     set({ snapshot, snapshotAt: Date.now(), error: null });
   },
   _onNotice: ({ key, vars }) => {
     if (!key) return;
+    const cue = {
+      'notice.joined': 'join',
+      'notice.left': 'leave',
+      'notice.blindsUp': 'blinds',
+      'notice.eliminated': 'eliminated',
+      'notice.tournamentWon': 'victory'
+    }[key];
+    if (cue) sfxService.play(cue);
     toastSeq += 1;
     const id = toastSeq;
     set((s) => ({ toasts: [...s.toasts, { id, key, vars: vars || {} }].slice(-4) }));
@@ -175,8 +227,11 @@ export const useGameStore = create((set, get) => ({
         set((st) => ({
           actions: { ...st.actions, [payload.playerId]: { action: payload.action, amount: payload.amount } }
         }));
-        const s = resolveActionSound(payload);
+        const s = payload.action === 'allin' ? 'allin' : resolveActionSound(payload);
         if (s) sfxService.play(s);
+        if (get().sfx.dealerCalls) {
+          voicePlayer.say(voicePath('dealer', `dealer-${payload.action}`), { skipIfBusy: true });
+        }
         // Sprint 6 — auto emote for the LOCAL player's own actions
         if (payload.playerId === get().playerId) {
           get()._autoEmote('actionTaken', { action: payload.action });
@@ -246,6 +301,36 @@ export const useGameStore = create((set, get) => ({
   setTutorialEventCb(fn) {
     set({ _tutorialEventCb: fn || null });
   },
+  /**
+   * A CPU, the announcer or the dealer says something: play the clip, show a
+   * bubble over the CPU's seat, and put the words in the chat.
+   */
+  _onVoiceLine: (line) => {
+    if (!line || !line.id || !line.voice) return;
+    const { sfx } = get();
+    const isCpu = line.speaker === 'cpu';
+    if (isCpu && !sfx.talk) return; // table talk switched off
+    if (line.sfx) sfxService.play(line.sfx);
+    voicePlayer.say(voicePath(line.voice, line.id));
+    set((s) => ({
+      chat: [
+        ...s.chat,
+        { from: line.name || '🎙️', text: line.text, ts: line.ts || Date.now(), bot: true }
+      ].slice(-100)
+    }));
+    if (isCpu && line.playerId) {
+      const ts = Date.now();
+      set((s) => ({ speech: { ...s.speech, [line.playerId]: { text: line.text, ts } } }));
+      setTimeout(() => {
+        set((s) => {
+          if (!s.speech[line.playerId] || s.speech[line.playerId].ts !== ts) return {};
+          const speech = { ...s.speech };
+          delete speech[line.playerId];
+          return { speech };
+        });
+      }, 4000);
+    }
+  },
   _onConnect: () => set({ connected: true }),
   // The server drops our seat when the socket goes away, so forget the table.
   _onDisconnect: () => set({ connected: false, ...TABLE_STATE() }),
@@ -261,6 +346,7 @@ export const useGameStore = create((set, get) => ({
     socket.on('handRecord', this._onHandRecord);
     socket.on('emote', this._onEmote);
     socket.on('notice', this._onNotice);
+    socket.on('voiceLine', this._onVoiceLine);
     socket.on('connect_error', this._onError);
   },
 
@@ -302,6 +388,7 @@ export const useGameStore = create((set, get) => ({
       return false;
     }
     set({ tableId: res.tableId || tableId, name, playerId: res.playerId, error: null });
+    musicPlayer.start();
     return true;
   },
 
@@ -328,6 +415,7 @@ export const useGameStore = create((set, get) => ({
   async rebuy() {
     const res = await emitAck('rebuy');
     if (!res.ok) set({ error: res.error });
+    else sfxService.play('rebuy');
     return res;
   },
 
@@ -468,9 +556,7 @@ export const useGameStore = create((set, get) => ({
   async hydrate() {
     try {
       const { profile, avatar } = await autosave.hydrate();
-      const sfx = { muted: !!profile.sfx.muted, volume: Number(profile.sfx.volume) || 0.8 };
-      sfxService.setMuted(sfx.muted);
-      sfxService.setVolume(sfx.volume);
+      const sfx = applySound(profile.sfx);
       const locale = profile.language === 'es' ? 'es' : 'en';
       applyModuleLocale(locale);
       set({
@@ -593,12 +679,7 @@ export const useGameStore = create((set, get) => ({
 
   /** Set SFX mute + volume, apply to the service, and persist in the profile. */
   setSfx(partial = {}) {
-    const next = { ...get().sfx, ...partial };
-    const muted = !!next.muted;
-    const volume = Number.isFinite(Number(next.volume)) ? Math.max(0, Math.min(1, Number(next.volume))) : 0.8;
-    sfxService.setMuted(muted);
-    sfxService.setVolume(volume);
-    const sfx = { muted, volume };
+    const sfx = applySound({ ...get().sfx, ...partial });
     set((s) => ({ sfx, profile: { ...s.profile, sfx } }));
     autosave.saveProfile({ ...get().profile, sfx }).catch(() => {});
   },
@@ -676,6 +757,8 @@ export const useGameStore = create((set, get) => ({
 
   async leave() {
     await emitAck('leaveTable');
+    musicPlayer.stop();
+    voicePlayer.stop();
     // Keep the profile, avatar, sound and language — only the table goes away.
     set({ ...TABLE_STATE(), error: null });
   },
@@ -688,3 +771,6 @@ export const useGameStore = create((set, get) => ({
     set({ error: null });
   }
 }));
+
+// The radio reports what it is playing; the top bar shows it.
+musicPlayer.onChange = (radio) => useGameStore.setState({ radio });

@@ -2,11 +2,11 @@
 
 Local-network Texas Hold'em in an npm-workspaces monorepo:
 
-| Workspace  | What it is                                                                                   |
-| ---------- | -------------------------------------------------------------------------------------------- |
-| `shared/`  | Pure, deterministic domain logic + AI (no I/O) — cards, seeded RNG, hand evaluator, pots, betting rules, `GameTable`, AI profiles/Monte-Carlo/decision engine |
-| `server/`  | Express + Socket.IO authoritative game server. Auto-drives AI seats. Serves `frontend/dist` in prod |
-| `frontend/`| React + Vite client (Zustand store, i18n helper, join/table/controls/chat UI)                |
+| Workspace   | What it is                                                                                                                                                    |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `shared/`   | Pure, deterministic domain logic + AI (no I/O) — cards, seeded RNG, hand evaluator, pots, betting rules, `GameTable`, AI profiles/Monte-Carlo/decision engine |
+| `server/`   | Express + Socket.IO authoritative game server. Auto-drives AI seats. Serves `frontend/dist` in prod                                                           |
+| `frontend/` | React + Vite client (Zustand store, i18n helper, join/table/controls/chat UI)                                                                                 |
 
 Ranks use `"T"` for ten (never `"10"`); suits are `s`/`h`/`d`/`c`. All randomness flows
 through the seeded `Rng` (`createShuffledDeck(seed)`) — same seed + same action sequence ⇒ identical hand.
@@ -55,7 +55,7 @@ node scripts/ai-benchmark.mjs 12000
   build is uploaded as an artifact. It is deliberately fast and dependency-light so
   the always-on gate stays green.
 - **`E2E (manual)` (`.github/workflows/e2e.yml`)** — `workflow_dispatch`-only.
-  Builds the frontend, boots the *production* server, and drives it over real
+  Builds the frontend, boots the _production_ server, and drives it over real
   HTTP + Socket.IO via `scripts/ci-e2e-smoke.mjs` (health, served index.html,
   two-player join → startHand → per-viewer hole-card privacy). Kept out of the
   main gate so browser/network flakiness can't fail a push.
@@ -66,12 +66,12 @@ Start the server (`npm run dev:server` + `npm run dev:client` in development, or
 `npm run build && npm run start`), open the page, pick a name and a character, and
 choose how to play:
 
-| Game | What happens |
-| ---- | ------------ |
-| **Cash game vs CPUs** | 1–8 CPU opponents (Easy / Normal / Hard / Mixed). Hands deal automatically; buy back in whenever you are out of chips. CPUs buy back in too. |
+| Game                    | What happens                                                                                                                                                        |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Cash game vs CPUs**   | 1–8 CPU opponents (Easy / Normal / Hard / Mixed). Hands deal automatically; buy back in whenever you are out of chips. CPUs buy back in too.                        |
 | **Sit & Go tournament** | Everyone starts with the same stack, blinds rise every 8 hands, no rebuys. Eliminations are announced, and the final standings appear with a **Play again** button. |
-| **Play with friends** | Join or start a named table; anyone on the same network can sit at it. The join screen lists the tables running right now. |
-| **Just watch** | Spectate a table with every card visible and step through it one action at a time. |
+| **Play with friends**   | Join or start a named table; anyone on the same network can sit at it. The join screen lists the tables running right now.                                          |
+| **Just watch**          | Spectate a table with every card visible and step through it one action at a time.                                                                                  |
 
 **Table options** (on the join screen): number of CPUs, CPU difficulty, blinds,
 starting chips (50 / 100 / 200 big blinds), shot clock (off / 15 / 30 / 60 s) and
@@ -82,10 +82,10 @@ At the table:
 - **Actions:** Fold / Check-or-Call / Raise-to (becomes All-in at the max), with
   Min · ½ · ⅔ · Pot · Max sizing, an exact amount box and a slider.
   Keyboard: **F** fold, **C** check/call, **R** raise, **A** all in.
-- **Act in advance:** while others act, tick *Check / Fold*, *Check* or *Call any*
+- **Act in advance:** while others act, tick _Check / Fold_, _Check_ or _Call any_
   and it fires the moment your turn comes.
 - **Shot clock:** a ring runs down around the acting player. If it runs out you
-  check or fold; miss twice in a row and you are sat out (press *I'm back*).
+  check or fold; miss twice in a row and you are sat out (press _I'm back_).
 - **Sit out** any time from the HUD. In a tournament you stay dealt in and fold
   automatically, as in a real one.
 - **Showdown:** hands that reach showdown are turned face up and named, the five
@@ -226,7 +226,7 @@ shared, deterministic domain logic (no AI or hand-evaluation code is duplicated)
 - **Odds HUD** (`frontend/src/components/HudOdds.jsx`): a per-seat win/tie/lose
   estimate. Toggle it on in the table topline (**"Odds HUD"**). The numbers come
   from the shared `equityForPlayer(snapshot, playerId, seed, iterations)`
-  (`shared/src/equity.js`), a thin wrapper over the *one* Monte-Carlo
+  (`shared/src/equity.js`), a thin wrapper over the _one_ Monte-Carlo
   (`aiMonteCarlo.estimateWinTieLose`) the HARD AI already uses. The seed is derived
   from `tableId + handNumber + street + seat`, so the estimate is stable and
   reproducible for a given view. Privacy is enforced by the snapshot itself: a
@@ -295,6 +295,18 @@ shared, deterministic domain logic (no AI or hand-evaluation code is duplicated)
   always best-effort and never breaks the game. Mute + volume gate both paths;
   `setPlayer()` is the injection seam the unit tests use to assert delegation
   and fallback without a browser.
+- **Table talk, effects and KSAL radio** (`shared/src/voiceLines.js`,
+  `server/src/tableTalk.js`, `frontend/src/services/audioService.js`): CPUs
+  greet, heckle, gloat, bluff-brag and cry about bad beats out loud (77 lines,
+  each voiced in 7 character voices); an announcer calls big hands, blinds and
+  champions; an optional dealer calls every action. The server picks who says
+  what (rate-limited so it never gets chatty) and every seat hears the same
+  line. Winning a pot plays a different sting each time (coins, pizzicato,
+  steel), big wins get a saloon crowd, bad beats a sad sax. The top bar's
+  **KSAL Saloon Radio** shuffles six CC0 western tracks, with station IDs and DJ
+  jokes between songs, and ducks under voices. Settings has separate volumes
+  for effects, voices and music plus toggles for table talk and dealer calls.
+  Sources and licenses: `frontend/public/assets/CREDITS.md`.
 - **Western art pass — animated cards** (`components/Table.jsx` +
   `frontend/src/styles.css`): the table now plays a real card game. Community
   cards are **keyed by slot** so each newly-dealt card mounts and animates in;
@@ -338,7 +350,7 @@ workspaces. Total: **291 tests**, all passing.
     `ai.test.js` (AI-only autonomous hand with chip conservation; mixed
     human+bot with hole-card privacy; `spawnBot` "Play vs AI" flow).
   - `integration.test.js` — **Sprint 6 cross-view privacy**: a spectator sees
-    the bot's hole cards while a live player sees only their own, on the *same*
+    the bot's hole cards while a live player sees only their own, on the _same_
     hand; chip conservation across the full hand. Driven via `ack` snapshots
     and a spectator `step` that un-freezes the auto-advance.
 - `frontend/tests/` — client behavior + a11y + i18n:
@@ -350,8 +362,8 @@ workspaces. Total: **291 tests**, all passing.
   - `a11y.test.jsx` — **Sprint 6 accessibility** (27 tests): renders real
     components under jsdom and asserts screen-reader semantics, ARIA
     roles/labels/live-regions, the skip link, `AvatarCropper` dialog semantics
-    + focus + Esc, keyboard-activatable controls, `<html lang>` sync, and that
-    every a11y i18n key exists in both EN and ES.
+    - focus + Esc, keyboard-activatable controls, `<html lang>` sync, and that
+      every a11y i18n key exists in both EN and ES.
   - `i18nParity.test.js` — **Sprint 6 i18n** (6 tests): EN/ES key-set equality,
     no empty values, and matching `{placeholder}` token sets across every key.
 

@@ -10,16 +10,16 @@
 
 /** The full set of emotes a player can send or receive. */
 export const EMOTES = [
-  { code: 'tip_hat',    glyph: '🎩', label_key: 'emote.tip_hat' },
-  { code: 'thumbs_up',  glyph: '👍', label_key: 'emote.thumbs_up' },
-  { code: 'fist_bump',  glyph: '👊', label_key: 'emote.fist_bump' },
-  { code: 'whiskey',    glyph: '🥃', label_key: 'emote.whiskey' },
-  { code: 'coins',      glyph: '💰', label_key: 'emote.coins' },
-  { code: 'cards',      glyph: '🃏', label_key: 'emote.cards' },
-  { code: 'fire',       glyph: '🔥', label_key: 'emote.fire' },
-  { code: 'cool',       glyph: '😎', label_key: 'emote.cool' },
-  { code: 'sad',        glyph: '😢', label_key: 'emote.sad' },
-  { code: 'cheer',      glyph: '🎉', label_key: 'emote.cheer' },
+  { code: 'tip_hat', glyph: '🎩', label_key: 'emote.tip_hat' },
+  { code: 'thumbs_up', glyph: '👍', label_key: 'emote.thumbs_up' },
+  { code: 'fist_bump', glyph: '👊', label_key: 'emote.fist_bump' },
+  { code: 'whiskey', glyph: '🥃', label_key: 'emote.whiskey' },
+  { code: 'coins', glyph: '💰', label_key: 'emote.coins' },
+  { code: 'cards', glyph: '🃏', label_key: 'emote.cards' },
+  { code: 'fire', glyph: '🔥', label_key: 'emote.fire' },
+  { code: 'cool', glyph: '😎', label_key: 'emote.cool' },
+  { code: 'sad', glyph: '😢', label_key: 'emote.sad' },
+  { code: 'cheer', glyph: '🎉', label_key: 'emote.cheer' }
 ];
 
 /** Valid emote codes (useful for validation). */

@@ -83,3 +83,31 @@ describe('Controls', () => {
     expect(spy).toHaveBeenLastCalledWith('fold');
   });
 });
+
+describe('hand-end sound for me', () => {
+  const ended = (payouts, { shown = {}, mine = 0 } = {}) => ({
+    payouts,
+    snapshot: {
+      bigBlind: 20,
+      lastShowdown: Object.keys(shown).length ? { all: shown } : null,
+      players: [{ id: 'me', contributions: { preflop: mine, flop: 0, turn: 0, river: 0 } }]
+    }
+  });
+
+  it('picks a small or big win flourish by pot size', async () => {
+    const { handEndSoundForMe } = await import('../src/store.js');
+    expect(handEndSoundForMe(ended({ me: 100 }), 'me')).toBe('cheer');
+    expect(handEndSoundForMe(ended({ me: 2000 }), 'me')).toBe('bigWin');
+  });
+
+  it('only groans for a lost showdown, and saves the trombone for big ones', async () => {
+    const { handEndSoundForMe } = await import('../src/store.js');
+    expect(handEndSoundForMe(ended({ cpu: 100 }), 'me')).toBeNull(); // folded: silence
+    expect(handEndSoundForMe(ended({ cpu: 100 }, { shown: { me: {}, cpu: {} }, mine: 40 }), 'me')).toBe(
+      'grunt'
+    );
+    expect(handEndSoundForMe(ended({ cpu: 2000 }, { shown: { me: {}, cpu: {} }, mine: 1000 }), 'me')).toBe(
+      'badBeat'
+    );
+  });
+});

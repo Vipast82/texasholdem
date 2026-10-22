@@ -63,3 +63,31 @@ export const CloseIcon = (p) => (
     <path d="M18 6 6 18M6 6l12 12" />
   </Icon>
 );
+
+export const RadioIcon = (p) => (
+  <Icon {...p}>
+    <rect x="3" y="8" width="18" height="12" rx="2" />
+    <path d="m7 8 9-5" />
+    <circle cx="15.5" cy="14" r="2.5" />
+    <path d="M6 12h4M6 15h4" />
+  </Icon>
+);
+
+export const PlayIcon = (p) => (
+  <Icon {...p}>
+    <path d="M7 4v16l13-8Z" />
+  </Icon>
+);
+
+export const PauseIcon = (p) => (
+  <Icon {...p}>
+    <path d="M8 4v16M16 4v16" />
+  </Icon>
+);
+
+export const SkipIcon = (p) => (
+  <Icon {...p}>
+    <path d="m5 4 10 8-10 8Z" />
+    <path d="M19 5v14" />
+  </Icon>
+);

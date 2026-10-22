@@ -38,8 +38,7 @@ export class Rng {
       throw new Error('Rng requires an explicit seed (determinism is a hard requirement)');
     }
     this.seed = String(seed);
-    this._next =
-      typeof seed === 'number' ? mulberry32(seed >>> 0) : mulberry32(xmur3(this.seed)());
+    this._next = typeof seed === 'number' ? mulberry32(seed >>> 0) : mulberry32(xmur3(this.seed)());
   }
 
   /** Uniform float in [0, 1). */

@@ -13,6 +13,24 @@ const FELT_SWATCH = {
   black: '#262624'
 };
 
+function VolumeRow({ label, value, disabled, onChange }) {
+  return (
+    <label className="range">
+      <span>{label}</span>
+      <input
+        type="range"
+        min={0}
+        max={1}
+        step={0.05}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(Number(e.target.value))}
+      />
+      <output>{Math.round(value * 100)}%</output>
+    </label>
+  );
+}
+
 /** Language, sound, table appearance and your character. */
 export default function SettingsPanel() {
   const sfx = useGameStore((s) => s.sfx);
@@ -47,18 +65,45 @@ export default function SettingsPanel() {
           <input type="checkbox" checked={sfx.muted} onChange={(e) => setSfx({ muted: e.target.checked })} />
           <span>{t('settings.mute')}</span>
         </label>
-        <label className="range">
-          <span>{t('settings.volume')}</span>
+        <VolumeRow
+          label={t('settings.effects')}
+          value={sfx.volume}
+          disabled={sfx.muted}
+          onChange={(v) => setSfx({ volume: v })}
+        />
+        <VolumeRow
+          label={t('settings.voices')}
+          value={sfx.voiceVolume}
+          disabled={sfx.muted}
+          onChange={(v) => setSfx({ voiceVolume: v })}
+        />
+        <label className="toggle">
+          <input type="checkbox" checked={sfx.music} onChange={(e) => setSfx({ music: e.target.checked })} />
+          <span>{t('settings.music')}</span>
+        </label>
+        <VolumeRow
+          label={t('settings.musicVolume')}
+          value={sfx.musicVolume}
+          disabled={sfx.muted || !sfx.music}
+          onChange={(v) => setSfx({ musicVolume: v })}
+        />
+        <label className="toggle">
+          <input type="checkbox" checked={sfx.talk} onChange={(e) => setSfx({ talk: e.target.checked })} />
+          <span>
+            {t('settings.talk')}
+            <small>{t('settings.talkHelp')}</small>
+          </span>
+        </label>
+        <label className="toggle">
           <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={sfx.volume}
-            disabled={sfx.muted}
-            onChange={(e) => setSfx({ volume: Number(e.target.value) })}
+            type="checkbox"
+            checked={sfx.dealerCalls}
+            onChange={(e) => setSfx({ dealerCalls: e.target.checked })}
           />
-          <output>{Math.round(sfx.volume * 100)}%</output>
+          <span>
+            {t('settings.dealerCalls')}
+            <small>{t('settings.dealerCallsHelp')}</small>
+          </span>
         </label>
       </fieldset>
 

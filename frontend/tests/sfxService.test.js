@@ -10,7 +10,9 @@ import {
   soundForBotAction,
   resolveActionSound,
   resolveHandEndSound,
-  SfxService
+  SfxService,
+  SAMPLES,
+  sampleFile
 } from '../src/services/sfxService.js';
 
 describe('soundForAction (default map)', () => {
@@ -124,7 +126,23 @@ describe('SfxService', () => {
   });
 
   it('exposes the canonical sound names', () => {
-    expect(SFX_NAMES).toEqual(['chip', 'flick', 'cheer', 'grunt', 'shuffle', 'deal', 'flip', 'chips']);
+    for (const name of ['chip', 'flick', 'cheer', 'grunt', 'shuffle', 'deal', 'flip', 'chips']) {
+      expect(SFX_NAMES).toContain(name);
+    }
+    // The turn chime and clock tick must be playable (they were once missing).
+    expect(SFX_NAMES).toContain('turn');
+    expect(SFX_NAMES).toContain('tick');
+  });
+
+  it('every sample a sound can use is a known sound name', () => {
+    for (const name of Object.keys(SAMPLES)) expect(SFX_NAMES).toContain(name);
+  });
+
+  it('picks between variants for sounds that have several', () => {
+    const picks = new Set();
+    for (let i = 0; i < 30; i += 1) picks.add(sampleFile('cheer', () => (i % 3) / 3));
+    expect(picks.size).toBe(3);
+    expect(sampleFile('chip')).toBe('poker-chip.mp3');
   });
 
   it('delegates to a real sample backend when installed', () => {
@@ -148,6 +166,17 @@ describe('SfxService', () => {
     s.play('chips'); // has a sample in browserSound, but our stub does not handle it
     expect(synthCalled).toBe(true);
     expect(s.lastPlayed.name).toBe('chips');
+  });
+
+  it('never falls back to a synth tone for win sounds', () => {
+    const s = new SfxService();
+    let synthCalls = 0;
+    s.setPlayer(() => undefined); // the clip could not play
+    s._synth = () => {
+      synthCalls += 1;
+    };
+    for (const name of ['cheer', 'bigWin', 'victory']) s.play(name);
+    expect(synthCalls).toBe(0);
   });
 
   it('clears the sample backend when setPlayer(null) is called', () => {

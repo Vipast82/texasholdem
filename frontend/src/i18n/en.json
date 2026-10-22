@@ -148,7 +148,6 @@
   "avatar.error.generic": "Avatar could not be saved. Try again.",
   "settings.sound": "Sound",
   "settings.mute": "Mute sound",
-  "settings.volume": "Volume",
   "settings.avatar": "Your character",
   "settings.avatarPick": "Choose a picture",
   "settings.avatarChange": "Change picture",
@@ -351,5 +350,19 @@
   "history.won.short": "Won",
   "history.biggest": "Biggest pot",
   "history.lifetime": "All time: {hands} hands played, {won} won, biggest pot {biggest}, {tournaments} tournaments won.",
-  "history.hands": "Recent hands"
+  "history.hands": "Recent hands",
+  "settings.effects": "Effects",
+  "settings.voices": "Voices",
+  "settings.music": "Background music",
+  "settings.musicVolume": "Music",
+  "settings.talk": "Table talk",
+  "settings.talkHelp": "CPUs heckle, brag and grumble out loud.",
+  "settings.dealerCalls": "Dealer calls the action",
+  "settings.dealerCallsHelp": "Hear \"Check\", \"Raise\", \"All in!\" as players act.",
+  "radio.label": "Saloon radio",
+  "radio.turnOn": "Radio off — turn on",
+  "radio.tuning": "Tuning in…",
+  "radio.play": "Play the radio",
+  "radio.pause": "Pause the radio",
+  "radio.skip": "Next song"
 }

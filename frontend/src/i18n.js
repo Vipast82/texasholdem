@@ -29,8 +29,5 @@ export function t(key, vars = {}) {
   let raw = loc[key];
   if (raw === undefined) raw = en[key];
   if (raw === undefined) raw = key;
-  return Object.entries(vars).reduce(
-    (acc, [k, v]) => acc.split(`{${k}}`).join(String(v)),
-    raw
-  );
+  return Object.entries(vars).reduce((acc, [k, v]) => acc.split(`{${k}}`).join(String(v)), raw);
 }

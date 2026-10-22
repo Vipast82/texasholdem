@@ -1,0 +1,47 @@
+{
+  "station": "KSAL Saloon Radio",
+  "tracks": [
+    {
+      "file": "/assets/music/weasel-trot.mp3",
+      "title": "Weasel Trot",
+      "artist": "ShggothSlave",
+      "license": "CC0",
+      "source": "https://opengameart.org/node/177417"
+    },
+    {
+      "file": "/assets/music/gone-fishin.mp3",
+      "title": "Gone Fishin'",
+      "artist": "Memoraphile",
+      "license": "CC0",
+      "source": "https://opengameart.org/content/gone-fishin"
+    },
+    {
+      "file": "/assets/music/beary-fishy.mp3",
+      "title": "Beary Fishy",
+      "artist": "Memoraphile",
+      "license": "CC0",
+      "source": "https://opengameart.org/content/gone-fishin"
+    },
+    {
+      "file": "/assets/music/old-west-style.mp3",
+      "title": "Old West Style",
+      "artist": "Tozan",
+      "license": "CC0",
+      "source": "https://opengameart.org/content/old-west-style"
+    },
+    {
+      "file": "/assets/music/crowded-pub.mp3",
+      "title": "Crowded Pub",
+      "artist": "Bobjt",
+      "license": "CC0",
+      "source": "https://opengameart.org/content/crowded-pub"
+    },
+    {
+      "file": "/assets/music/western-style.mp3",
+      "title": "Western Style Song",
+      "artist": "DaGameKnower",
+      "license": "CC0",
+      "source": "https://opengameart.org/content/western-style-song"
+    }
+  ]
+}

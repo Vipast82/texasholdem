@@ -6,7 +6,19 @@ import Controls from './components/Controls.jsx';
 import SidePanel from './components/SidePanel.jsx';
 import SpectatorBar from './components/SpectatorBar.jsx';
 import SettingsPanel from './components/SettingsPanel.jsx';
-import { ChatIcon, GearIcon, SoundIcon, ExitIcon, HistoryIcon, BookIcon } from './components/Icons.jsx';
+import {
+  ChatIcon,
+  GearIcon,
+  SoundIcon,
+  ExitIcon,
+  HistoryIcon,
+  BookIcon,
+  RadioIcon,
+  PlayIcon,
+  PauseIcon,
+  SkipIcon
+} from './components/Icons.jsx';
+import { musicPlayer } from './services/audioService.js';
 import { describeHand } from './handStrength.js';
 import { t } from './i18n.js';
 
@@ -134,6 +146,52 @@ function TableInfo({ snapshot, tableId }) {
   );
 }
 
+/** KSAL saloon radio: what's playing, with play/pause and skip. */
+function RadioStrip() {
+  const radio = useGameStore((s) => s.radio);
+  const music = useGameStore((s) => s.sfx.music);
+  const setSfx = useGameStore((s) => s.setSfx);
+  if (!music) {
+    return (
+      <button type="button" className="radio radio--off" onClick={() => setSfx({ music: true })}>
+        <RadioIcon size={18} />
+        <span>{t('radio.turnOn')}</span>
+      </button>
+    );
+  }
+  const track = radio.track;
+  return (
+    <div className="radio" role="group" aria-label={t('radio.label')}>
+      <RadioIcon size={18} />
+      <span
+        className="radio__text"
+        title={track && track.license ? `${track.title} — ${track.artist} (${track.license})` : undefined}
+      >
+        <span className="radio__station">{radio.station}</span>
+        <span className="radio__track">{track ? `${track.title} — ${track.artist}` : t('radio.tuning')}</span>
+      </span>
+      <button
+        type="button"
+        className="radio__btn"
+        onClick={() => musicPlayer.toggle()}
+        aria-label={radio.playing ? t('radio.pause') : t('radio.play')}
+        title={radio.playing ? t('radio.pause') : t('radio.play')}
+      >
+        {radio.playing ? <PauseIcon size={16} /> : <PlayIcon size={16} />}
+      </button>
+      <button
+        type="button"
+        className="radio__btn"
+        onClick={() => musicPlayer.skip()}
+        aria-label={t('radio.skip')}
+        title={t('radio.skip')}
+      >
+        <SkipIcon size={16} />
+      </button>
+    </div>
+  );
+}
+
 /** Sit out the next hands (or come back). */
 function SitOutToggle({ snapshot, playerId }) {
   const sitOut = useGameStore((s) => s.sitOut);
@@ -218,6 +276,7 @@ export default function App() {
             <span className="topbar__title">{t('app.title')}</span>
             <span className="topbar__meta">{t('app.table', { id: tableId })}</span>
           </div>
+          <RadioStrip />
           <div className="topbar__actions">
             <IconButton label={t('hud.sound')} onClick={() => setSfx({ muted: !sfx.muted })}>
               <SoundIcon muted={sfx.muted} />

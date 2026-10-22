@@ -219,6 +219,7 @@ function Seat({
   winAmount,
   lastAction,
   emote,
+  speech,
   highlight,
   onRemoveBot,
   avatarSize,
@@ -250,10 +251,16 @@ function Seat({
     >
       <div className="seat__avatar">
         <SeatAvatar player={player} size={avatarSize} isMe={isYou} />
-        {emote && (
-          <span className="seat__emote" aria-hidden="true">
-            {emote}
+        {speech ? (
+          <span className="seat__speech" aria-hidden="true">
+            {speech}
           </span>
+        ) : (
+          emote && (
+            <span className="seat__emote" aria-hidden="true">
+              {emote}
+            </span>
+          )
         )}
         {isDealer && <DealerButton active seat={player.name} />}
         {turn && <TurnRing key={turn.key} remaining={turn.remaining} total={turn.total} />}
@@ -426,6 +433,7 @@ export default function Table({ snapshot }) {
   const actions = useGameStore((s) => s.actions);
   const spectator = useGameStore((s) => s.spectator);
   const emotes = useGameStore((s) => s.emotes);
+  const speech = useGameStore((s) => s.speech);
   const removeBot = useGameStore((s) => s.removeBot);
   const snapshotAt = useGameStore((s) => s.snapshotAt);
   const felt = useGameStore((s) => s.profile.settings.felt);
@@ -571,6 +579,7 @@ export default function Table({ snapshot }) {
             winAmount={payouts[p.id] || 0}
             lastAction={actions[p.id] || null}
             emote={emotes[p.id] ? emotes[p.id].glyph : null}
+            speech={speech[p.id] ? speech[p.id].text : null}
             highlight={highlight}
             onRemoveBot={p.isBot && canRemoveBots ? removeBot : null}
             avatarSize={p.id === playerId ? (compact ? 44 : 64) : compact ? 36 : 52}

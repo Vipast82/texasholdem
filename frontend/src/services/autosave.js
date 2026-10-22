@@ -24,7 +24,12 @@ export const PROFILE_DEFAULTS = {
   },
   sfx: {
     muted: false,
-    volume: 0.8
+    volume: 0.8,
+    voiceVolume: 0.9,
+    music: true,
+    musicVolume: 0.35,
+    talk: true,
+    dealerCalls: false
   },
   avatarId: null,
   look: null, // character-creator choices, or null for the default character
@@ -55,6 +60,8 @@ export function cleanLook(raw) {
   return Object.keys(out).length ? out : null;
 }
 
+const unit = (v, fallback) =>
+  Number.isFinite(Number(v)) && v !== null && v !== '' ? Math.max(0, Math.min(1, Number(v))) : fallback;
 const count = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.floor(Number(v)) : 0);
 
 /** Deep-merge a stored raw profile over the defaults (pure). */
@@ -72,10 +79,12 @@ export function mergeProfile(raw) {
     },
     sfx: {
       muted: !!(src.sfx && src.sfx.muted),
-      volume:
-        src.sfx && Number.isFinite(Number(src.sfx.volume))
-          ? Math.max(0, Math.min(1, Number(src.sfx.volume)))
-          : def.sfx.volume
+      volume: unit(src.sfx && src.sfx.volume, def.sfx.volume),
+      voiceVolume: unit(src.sfx && src.sfx.voiceVolume, def.sfx.voiceVolume),
+      music: src.sfx && src.sfx.music !== undefined ? !!src.sfx.music : def.sfx.music,
+      musicVolume: unit(src.sfx && src.sfx.musicVolume, def.sfx.musicVolume),
+      talk: src.sfx && src.sfx.talk !== undefined ? !!src.sfx.talk : def.sfx.talk,
+      dealerCalls: !!(src.sfx && src.sfx.dealerCalls)
     },
     avatarId: typeof src.avatarId === 'string' && src.avatarId ? src.avatarId : null,
     look: cleanLook(src.look),

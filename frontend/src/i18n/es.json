@@ -148,7 +148,6 @@
   "avatar.error.generic": "No se pudo guardar el avatar. Inténtalo de nuevo.",
   "settings.sound": "Sonido",
   "settings.mute": "Silenciar sonido",
-  "settings.volume": "Volumen",
   "settings.avatar": "Tu personaje",
   "settings.avatarPick": "Elegir una imagen",
   "settings.avatarChange": "Cambiar imagen",
@@ -351,5 +350,19 @@
   "history.won.short": "Ganadas",
   "history.biggest": "Mayor bote",
   "history.lifetime": "En total: {hands} manos jugadas, {won} ganadas, mayor bote {biggest}, {tournaments} torneos ganados.",
-  "history.hands": "Manos recientes"
+  "history.hands": "Manos recientes",
+  "settings.effects": "Efectos",
+  "settings.voices": "Voces",
+  "settings.music": "Música de fondo",
+  "settings.musicVolume": "Música",
+  "settings.talk": "Charla de mesa",
+  "settings.talkHelp": "La CPU se burla, presume y refunfuña en voz alta.",
+  "settings.dealerCalls": "El crupier anuncia las jugadas",
+  "settings.dealerCallsHelp": "Escucha \"Pasa\", \"Sube\", \"¡All in!\" cuando juegan.",
+  "radio.label": "Radio del salón",
+  "radio.turnOn": "Radio apagada — encender",
+  "radio.tuning": "Sintonizando…",
+  "radio.play": "Poner la radio",
+  "radio.pause": "Pausar la radio",
+  "radio.skip": "Siguiente canción"
 }

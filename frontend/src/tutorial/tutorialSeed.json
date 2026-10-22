@@ -8,7 +8,7 @@
     "seats": 2,
     "players": [
       { "id": "A", "name": "Alice", "seat": 0 },
-      { "id": "B", "name": "Bob",   "seat": 1 }
+      { "id": "B", "name": "Bob", "seat": 1 }
     ]
   },
   "expected": {
@@ -17,8 +17,8 @@
       "B": ["9d", "As"]
     },
     "community": {
-      "flop":  ["4c", "6c", "3s"],
-      "turn":  "Qs",
+      "flop": ["4c", "6c", "3s"],
+      "turn": "Qs",
       "river": "9s"
     }
   }

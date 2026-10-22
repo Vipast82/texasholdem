@@ -14,8 +14,14 @@ import {
   Rng,
   buildHandRecord,
   serializeHandRecord,
-  recordOpponentHand
+  recordOpponentHand,
+  CPU_LINES,
+  ANNOUNCER_LINES,
+  ANNOUNCER_KEY,
+  pickLine,
+  voiceForName
 } from '@saloon/shared';
+import { handEndTalk, actionTalk, slowHeckler } from './tableTalk.js';
 import {
   DEFAULT_SETTINGS,
   sanitizeSettings,
@@ -23,7 +29,6 @@ import {
   blindsForLevel,
   thinkingTimeMs,
   dealDelayMs,
-  botLine,
   IS_TEST
 } from './tableRules.js';
 
@@ -121,10 +126,52 @@ function notice(tableId, key, vars = {}) {
   io.to(tableRoom(tableId)).emit('notice', { key, vars, ts: Date.now() });
 }
 
-/** CPU table talk, sent like any chat message. */
-function botSay(tableId, name, kind) {
-  const text = botLine(kind);
-  if (text) io.to(tableRoom(tableId)).emit('chatMessage', { from: name, text, ts: Date.now(), bot: true });
+/** Minimum gaps between spoken lines, so the table never gets too chatty. */
+const CPU_TALK_GAP_MS = 5000;
+const ANNOUNCER_GAP_MS = 2500;
+
+/**
+ * Say a line out loud: pick one for the situation (avoiding an immediate
+ * repeat), rate-limit, and broadcast it so every seat plays the same clip.
+ * Clients play /assets/voice/<voice>/<id>.mp3 and show the text.
+ */
+function talk(tableId, decision, { force = false } = {}) {
+  const entry = store.get(tableId);
+  if (!entry || !decision) return;
+  const memo = entry.talk || (entry.talk = { cpuAt: 0, announcerAt: 0, last: {} });
+  const now = Date.now();
+  const isCpu = decision.speaker === 'cpu';
+  const lastAt = isCpu ? memo.cpuAt : memo.announcerAt;
+  if (!force && now - lastAt < (isCpu ? CPU_TALK_GAP_MS : ANNOUNCER_GAP_MS)) return;
+  let speakerName = null;
+  let voice = ANNOUNCER_KEY;
+  if (isCpu) {
+    const p = entry.table.playerById(decision.playerId);
+    if (!p) return;
+    speakerName = p.name;
+    voice = voiceForName(p.name);
+  }
+  const line = pickLine(
+    isCpu ? CPU_LINES : ANNOUNCER_LINES,
+    decision.category,
+    Math.random,
+    memo.last[decision.category]
+  );
+  if (!line) return;
+  memo.last[decision.category] = line.id;
+  if (isCpu) memo.cpuAt = now;
+  else memo.announcerAt = now;
+  io.to(tableRoom(tableId)).emit('voiceLine', {
+    speaker: decision.speaker,
+    playerId: decision.playerId || null,
+    name: speakerName,
+    voice,
+    id: line.id,
+    category: decision.category,
+    text: line.text,
+    sfx: decision.sfx || null,
+    ts: now
+  });
 }
 
 /**
@@ -295,6 +342,7 @@ function normalizeDifficulty(bot) {
 
 function clearTurn(entry) {
   if (entry.turn && entry.turn.timer) clearTimeout(entry.turn.timer);
+  if (entry.turn && entry.turn.heckle) clearTimeout(entry.turn.heckle);
   entry.turn = null;
 }
 
@@ -321,7 +369,15 @@ function armTurnTimer(tableId) {
     playerId: nextId,
     deadline: Date.now() + totalMs,
     totalMs,
-    timer: setTimeout(() => onTurnTimeout(tableId, key), totalMs)
+    timer: setTimeout(() => onTurnTimeout(tableId, key), totalMs),
+    // With a few seconds left, a CPU tells the slowpoke to hurry up.
+    heckle:
+      totalMs >= 12000 && !IS_TEST
+        ? setTimeout(() => {
+            if (!entry.turn || entry.turn.key !== key || Math.random() > 0.55) return;
+            talk(tableId, slowHeckler(entry.table, nextId));
+          }, totalMs - 8000)
+        : null
   };
 }
 
@@ -425,10 +481,14 @@ function dealHand(tableId, seed = null) {
       const [sb, bb] = blindsForLevel(tour.level, entry.settings.smallBlind, entry.settings.bigBlind);
       t.setBlinds(sb, bb);
       notice(tableId, 'notice.blindsUp', { sb, bb, level: tour.level });
+      talk(tableId, { speaker: 'announcer', category: 'blindsUp' }, { force: true });
     }
   }
   if (seed != null) t._handSeed = seed;
+  const firstHand =
+    t.handNumber === 0 || (entry.tour && entry.tour.level === 1 && entry.tour.handsAtLevel === 0);
   t.startHand();
+  if (firstHand) talk(tableId, { speaker: 'announcer', category: 'shuffle' }, { force: true });
   if (entry.tour) entry.tour.handsAtLevel += 1;
   sync(tableId);
   return true;
@@ -448,15 +508,19 @@ function onHandEnded(tableId) {
     s.biggestPot = Math.max(s.biggestPot, t.lastPot || amount);
   }
 
-  // Table talk: a CPU that just won a decent pot (or lost its stack) may speak up.
-  const potBB = (t.lastPot || 0) / t.bigBlind;
-  const talkative = t.handNumber - (entry.lastBotTalk || -10) >= 3;
-  if (talkative && Math.random() < 0.35) {
-    const winnerBot = t.players.find((p) => p.isBot && payouts[p.id] > 0);
-    if (winnerBot && potBB >= 15) {
-      botSay(tableId, winnerBot.name, 'win');
-      entry.lastBotTalk = t.handNumber;
-    }
+  // Table talk: brags, bad beats, busts, and the announcer for big hands.
+  // Wait for an all-in runout to finish on screen before anyone gloats.
+  const decisions = handEndTalk(t);
+  const handNo = t.handNumber;
+  if (decisions.length) {
+    setTimeout(
+      () => {
+        const live = store.get(tableId);
+        if (!live || live.table.handNumber !== handNo) return;
+        for (const d of decisions) talk(tableId, d);
+      },
+      t.runoutFrom !== null ? 3200 : 700
+    );
   }
 
   // Tournament: anyone who just ran out of chips is out; last one standing wins.
@@ -468,7 +532,7 @@ function onHandEnded(tableId) {
       tour.out.push(p.id);
       const place = aliveBefore - (busted.length - 1 - i);
       notice(tableId, 'notice.eliminated', { name: p.name, place });
-      if (p.isBot) botSay(tableId, p.name, 'busted');
+      if (!p.isBot) talk(tableId, { speaker: 'announcer', category: 'endOfTrail' }, { force: true });
     });
     const alive = t.players.filter((p) => p.chips > 0);
     if (alive.length <= 1) {
@@ -478,7 +542,13 @@ function onHandEnded(tableId) {
         const p = t.playerById(id);
         return { id, name: p ? p.name : '?', place: i + 1 };
       });
-      if (alive[0]) notice(tableId, 'notice.tournamentWon', { name: alive[0].name });
+      if (alive[0]) {
+        notice(tableId, 'notice.tournamentWon', { name: alive[0].name });
+        setTimeout(
+          () => talk(tableId, { speaker: 'announcer', category: 'tournamentWin' }, { force: true }),
+          1500
+        );
+      }
     }
   }
 }
@@ -614,6 +684,8 @@ function attachTable(tableId) {
       }
     });
   }
+  // CPUs react to all-ins and needle players who fold to their bets.
+  table.on('actionTaken', (payload) => talk(tableId, actionTalk(table, payload)));
 }
 
 // ----------------------------------------------------------------- sockets
@@ -767,7 +839,8 @@ io.on('connection', (socket) => {
       // "mixed" seats a spread of easy, normal and hard CPUs.
       const diff = botDifficulty === 'mixed' ? MIXED[i % MIXED.length] : normalizeDifficulty(botDifficulty);
       const botId = seatBot(entry, diff);
-      if (i === 0 && Math.random() < 0.6) botSay(id, entry.table.playerById(botId).name, 'greet');
+      if (i === 0 && Math.random() < 0.6)
+        talk(id, { speaker: 'cpu', playerId: botId, category: 'greet' }, { force: true });
     }
 
     reply({ ok: true, playerId, tableId: id });
@@ -872,6 +945,8 @@ io.on('connection', (socket) => {
     attachTable(tableId);
     reply({ ok: true, botId });
     notice(tableId, 'notice.joined', { name: entry.table.playerById(botId).name });
+    if (Math.random() < 0.4)
+      talk(tableId, { speaker: 'cpu', playerId: botId, category: 'greet' }, { force: true });
     sync(tableId);
   });
 
