@@ -19,6 +19,7 @@ import { getProfile } from '@saloon/shared/ai/aiProfiles';
 export const SFX_NAMES = [
   'chip',
   'flick',
+  'knock',
   'cheer',
   'grunt',
   'shuffle',
@@ -47,11 +48,16 @@ export const SFX_NAMES = [
  * below. Kept as pure data so it is trivially unit-testable.
  */
 export const SAMPLES = {
-  shuffle: { file: 'shuffle.mp3', volume: 0.9 },
-  deal: { file: 'deal.mp3', volume: 1.0 },
-  flip: { file: 'card-flip.mp3', volume: 0.9 },
-  chips: { file: 'chips.mp3', volume: 1.0 },
-  chip: { file: 'poker-chip.mp3', volume: 0.8 },
+  // Cards and chips (Kenney Casino Audio, CC0): several takes each so
+  // repeated actions never sound identical.
+  shuffle: { files: ['shuffle-riffle.mp3'], volume: 0.7 },
+  deal: { files: ['deal-1.mp3', 'deal-2.mp3', 'deal-3.mp3', 'deal-4.mp3'], volume: 0.75 },
+  flip: { files: ['flip-1.mp3', 'flip-2.mp3', 'flip-3.mp3'], volume: 0.75 },
+  chip: { files: ['bet-1.mp3', 'bet-2.mp3', 'bet-3.mp3', 'bet-4.mp3'], volume: 0.7 },
+  knock: { files: ['check-1.mp3', 'check-2.mp3', 'check-3.mp3'], volume: 0.6 },
+  flick: { files: ['fold-1.mp3', 'fold-2.mp3', 'fold-3.mp3'], volume: 0.55 },
+  // The pot sliding over to the winner: soft, under the win sting.
+  chips: { files: ['pot-1.mp3', 'pot-2.mp3', 'pot-3.mp3'], volume: 0.5 },
   // Winning a pot: a different flourish each time (no more synth scream).
   cheer: { files: ['win-coins.mp3', 'win-pizzicato.mp3', 'win-steel.mp3'], volume: 0.8 },
   grunt: { files: ['lose-pizzicato.mp3', 'lose-sting.mp3'], volume: 0.7 },
@@ -81,7 +87,7 @@ export const DEFAULT_SFX_MAP = {
   call: 'chip',
   raise: 'chip',
   allin: 'chip',
-  check: 'flick',
+  check: 'knock',
   fold: 'flick',
   win: 'cheer',
   lose: 'grunt'
@@ -239,6 +245,7 @@ const SAMPLE_ONLY = new Set(['cheer', 'bigWin', 'victory']);
 const SYNTH_PRESETS = {
   chip: { wave: 'square', from: 660, to: 990, dur: 0.08, amp: 0.5 },
   flick: { wave: 'triangle', from: 320, to: 180, dur: 0.06, amp: 0.4 },
+  knock: { wave: 'sine', from: 180, to: 120, dur: 0.05, amp: 0.35 },
   grunt: { wave: 'triangle', from: 220, to: 150, dur: 0.25, amp: 0.3 },
   shuffle: { wave: 'square', from: 180, to: 120, dur: 0.2, amp: 0.35 },
   deal: { wave: 'triangle', from: 500, to: 240, dur: 0.1, amp: 0.45 },

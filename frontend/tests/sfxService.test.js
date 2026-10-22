@@ -3,6 +3,8 @@
  * No AudioContext is needed: playback is best-effort and the tests only assert
  * the decision surface (which sound, and whether it's gated by mute).
  */
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import {
   SFX_NAMES,
@@ -18,7 +20,7 @@ import {
 describe('soundForAction (default map)', () => {
   it('maps known actions to their sounds', () => {
     expect(soundForAction('bet')).toBe('chip');
-    expect(soundForAction('check')).toBe('flick');
+    expect(soundForAction('check')).toBe('knock');
     expect(soundForAction('win')).toBe('cheer');
   });
 
@@ -59,7 +61,7 @@ describe('resolveActionSound (event payload)', () => {
       playerId: 'me',
       snapshot: { players: [{ id: 'me', isBot: false }] }
     };
-    expect(resolveActionSound(payload)).toBe('flick');
+    expect(resolveActionSound(payload)).toBe('knock');
   });
 
   it('returns null with no action', () => {
@@ -142,7 +144,14 @@ describe('SfxService', () => {
     const picks = new Set();
     for (let i = 0; i < 30; i += 1) picks.add(sampleFile('cheer', () => (i % 3) / 3));
     expect(picks.size).toBe(3);
-    expect(sampleFile('chip')).toBe('poker-chip.mp3');
+    expect(sampleFile('chip', () => 0)).toBe('bet-1.mp3');
+  });
+
+  it('every sample file is actually shipped', () => {
+    const dir = fileURLToPath(new URL('../public/assets/sfx/', import.meta.url));
+    for (const sample of Object.values(SAMPLES)) {
+      for (const file of sample.files || [sample.file]) expect(existsSync(dir + file), file).toBe(true);
+    }
   });
 
   it('delegates to a real sample backend when installed', () => {

@@ -286,15 +286,15 @@ shared, deterministic domain logic (no AI or hand-evaluation code is duplicated)
   **IndexedDB** and restored on load (`store.hydrate()`), so they survive a
   refresh with no backend.
 - **Real card & chip sound effects** (`frontend/public/assets/sfx/` +
-  `services/sfxService.js`): six real royalty-free MP3s (shuffle, deal,
-  card-flip, chip, chips, poker-chip) play on the engine's lifecycle events —
-  `handStarted → shuffle`, `holeDealt → deal`, `streetStarted → flip` (flop/
-  turn/river), `actionTaken → chip/flick`, `handEnded → cheer/grunt`. The
-  browser backend (`browserSound`) prefers the real sample and falls back to
-  the synthesized blips if a sample or the audio stack is missing, so sound is
-  always best-effort and never breaks the game. Mute + volume gate both paths;
-  `setPlayer()` is the injection seam the unit tests use to assert delegation
-  and fallback without a browser.
+  `services/sfxService.js`): CC0 recordings from Kenney's Casino Audio pack, with
+  several takes per sound so repeated actions never sound identical: a card
+  riffle on each new hand, card slides for the deal, card placements for the
+  flop/turn/river, chip clicks for bets, a chip tap for checks, cards shoved
+  into the muck for folds, and a soft chip gather when the pot slides to the
+  winner. The browser backend (`browserSound`) plays the sample and falls back
+  to a short synth blip if a clip cannot load (win sounds stay silent instead).
+  Mute + volume gate both paths; `setPlayer()` is the injection seam the unit
+  tests use.
 - **Table talk, effects and KSAL radio** (`shared/src/voiceLines.js`,
   `server/src/tableTalk.js`, `frontend/src/services/audioService.js`): CPUs
   greet, heckle, gloat, bluff-brag and cry about bad beats out loud (77 lines,
